@@ -84,18 +84,23 @@ attach to it immediately.
 Dashboard controls:
 
 ```text
-q / Esc      quit
-r            refresh sessions
-Tab          switch keyboard focus between sessions and panes
-j / Down     select next session or pane
-k / Up       select previous session or pane
-Enter        attach selected session, or start the selected launcher option
-|            split selected pane right
--            split selected pane down
-x            close selected pane
-Mouse click  select a visible session or pane row
-Mouse click  press New / Attach / Right / Down / Close / Refresh
-Wheel        move selection in the hovered list
+Mouse click        select a visible session or pane row
+Mouse click        press New / Attach / Right / Down / Close / Refresh
+Wheel              move selection in the hovered list
+Tab                switch keyboard focus between sessions and panes
+Up / Down          move selection in the focused list
+Enter              attach selected session, or start the selected launcher option
+Esc                quit or cancel command mode
+Ctrl-A             enter command mode
+
+Command mode:
+n                  new session
+a                  attach selected session
+v                  split selected pane right
+h                  split selected pane down
+x                  close selected pane
+r                  refresh sessions
+q                  quit dashboard
 ```
 
 `amux attach` enables tmux mouse support for the selected session before

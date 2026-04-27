@@ -9,8 +9,8 @@ use std::{
 use anyhow::{Context, Result};
 use crossterm::{
     event::{
-        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, MouseButton,
-        MouseEventKind,
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
+        MouseButton, MouseEventKind,
     },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
@@ -90,6 +90,7 @@ struct TuiState {
     selected_pane: usize,
     selected_launch: usize,
     focus: Focus,
+    command_mode: bool,
     message: String,
     current_dir: PathBuf,
 }
@@ -103,6 +104,7 @@ impl TuiState {
             selected_pane: 0,
             selected_launch: 0,
             focus: Focus::Sessions,
+            command_mode: false,
             message: "loading sessions".to_owned(),
             current_dir: env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
         };
@@ -429,16 +431,22 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<Opt
         match event::read().context("failed to read terminal event")? {
             Event::Key(key) if key.kind == KeyEventKind::Release => {}
             Event::Key(key) => match key.code {
-                KeyCode::Char('q') | KeyCode::Esc => return Ok(None),
-                KeyCode::Char('r') => {
-                    state.refresh_sessions();
+                KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    state.command_mode = true;
+                    state.message = "command mode".to_owned();
                     dirty = true;
                 }
+                KeyCode::Esc if state.command_mode => {
+                    state.command_mode = false;
+                    state.message = "command mode canceled".to_owned();
+                    dirty = true;
+                }
+                KeyCode::Esc => return Ok(None),
                 KeyCode::Tab => {
                     state.toggle_focus();
                     dirty = true;
                 }
-                KeyCode::Char('j') | KeyCode::Down => {
+                KeyCode::Down => {
                     match state.focus {
                         Focus::Sessions => state.select_next_session(),
                         Focus::Panes => state.select_next_pane(),
@@ -446,7 +454,7 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<Opt
                     }
                     dirty = true;
                 }
-                KeyCode::Char('k') | KeyCode::Up => {
+                KeyCode::Up => {
                     match state.focus {
                         Focus::Sessions => state.select_previous_session(),
                         Focus::Panes => state.select_previous_pane(),
@@ -454,18 +462,12 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<Opt
                     }
                     dirty = true;
                 }
-                KeyCode::Char('|') => {
-                    state.split_selected_pane(SplitDirection::Right);
-                    dirty = true;
-                }
-                KeyCode::Char('-') => {
-                    state.split_selected_pane(SplitDirection::Down);
-                    dirty = true;
-                }
-                KeyCode::Char('x') => {
-                    state.close_selected_pane();
-                    dirty = true;
-                }
+                KeyCode::Char(ch) if state.command_mode => match handle_command_key(&mut state, ch)
+                {
+                    CommandKeyAction::Continue => dirty = true,
+                    CommandKeyAction::Attach(session) => return Ok(Some(session)),
+                    CommandKeyAction::Quit => return Ok(None),
+                },
                 KeyCode::Enter if state.sessions.is_empty() => {
                     if let Some(session) = state.launch_selected() {
                         return Ok(Some(session));
@@ -553,6 +555,59 @@ fn activate_button(state: &mut TuiState, action: ButtonAction) -> Option<String>
     }
 }
 
+enum CommandKeyAction {
+    Continue,
+    Attach(String),
+    Quit,
+}
+
+fn handle_command_key(state: &mut TuiState, ch: char) -> CommandKeyAction {
+    match ch {
+        'n' => {
+            state.command_mode = false;
+            state
+                .launch_action(LaunchAction::Session)
+                .map(CommandKeyAction::Attach)
+                .unwrap_or(CommandKeyAction::Continue)
+        }
+        'a' => {
+            state.command_mode = false;
+            state
+                .selected_session_name()
+                .map(CommandKeyAction::Attach)
+                .unwrap_or_else(|| {
+                    state.message = "no session selected".to_owned();
+                    CommandKeyAction::Continue
+                })
+        }
+        'v' | '|' => {
+            state.command_mode = false;
+            state.split_selected_pane(SplitDirection::Right);
+            CommandKeyAction::Continue
+        }
+        'h' | '-' => {
+            state.command_mode = false;
+            state.split_selected_pane(SplitDirection::Down);
+            CommandKeyAction::Continue
+        }
+        'x' => {
+            state.command_mode = false;
+            state.close_selected_pane();
+            CommandKeyAction::Continue
+        }
+        'r' => {
+            state.command_mode = false;
+            state.refresh_sessions();
+            CommandKeyAction::Continue
+        }
+        'q' => CommandKeyAction::Quit,
+        _ => {
+            state.message = format!("unknown command: {ch}");
+            CommandKeyAction::Continue
+        }
+    }
+}
+
 fn draw(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     state: &TuiState,
@@ -585,14 +640,7 @@ fn draw(
             frame.render_widget(render_toolbar(state), toolbar);
             frame.render_stateful_widget(render_panes(state), panes, &mut pane_list_state(state));
             frame.render_widget(render_details(state), details);
-            let footer_text = if state.sessions.is_empty() {
-                " Enter start | click starter | [New] | r | q ".to_owned()
-            } else {
-                format!(
-                    " {} | Tab | Enter attach | | right | - down | x close | r | q ",
-                    state.message
-                )
-            };
+            let footer_text = footer_text(state);
             frame.render_widget(
                 Paragraph::new(footer_text).style(Style::default().fg(Color::DarkGray)),
                 footer,
@@ -600,6 +648,21 @@ fn draw(
         })
         .context("failed to draw terminal frame")?;
     Ok(hitboxes)
+}
+
+fn footer_text(state: &TuiState) -> String {
+    if state.command_mode {
+        return " COMMAND | n new | a attach | v right | h down | x close | r refresh | q quit | Esc cancel ".to_owned();
+    }
+
+    if state.sessions.is_empty() {
+        " Enter start | click starter | Ctrl-A commands ".to_owned()
+    } else {
+        format!(
+            " {} | Ctrl-A commands | Tab focus | Enter attach | mouse controls ",
+            state.message
+        )
+    }
 }
 
 fn render_sessions(state: &TuiState) -> List<'static> {

@@ -21,12 +21,15 @@ cargo run -p amux --
 
 Verify:
 
-- the alternate screen is restored after `q` or `Esc`
+- the alternate screen is restored after `Esc`
 - with no sessions, the launcher shows `Start Session`
 - `Enter` on a launcher item creates a session in the current directory and attaches
-- `r` refreshes the session list
+- `Ctrl-A` enters command mode
+- command mode `r` refreshes the session list
+- command mode `q` quits the dashboard
+- command mode `Esc` returns to normal mode
 - `Tab` switches keyboard focus between session and pane lists
-- arrow keys and `j`/`k` move selection in the focused list
+- arrow keys move selection in the focused list
 - mouse wheel moves selection in the hovered list
 - mouse click selects a visible session or pane row
 - mouse click on `Right` creates a side-by-side pane
