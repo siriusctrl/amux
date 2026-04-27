@@ -303,8 +303,8 @@ mod tests {
     #[test]
     fn shell_command_join_quotes_only_when_needed() {
         assert_eq!(
-            join_shell_command(&["codex".to_owned(), "hello world".to_owned()]),
-            "codex 'hello world'"
+            join_shell_command(&["printf".to_owned(), "hello world".to_owned()]),
+            "printf 'hello world'"
         );
         assert_eq!(
             join_shell_command(&["printf".to_owned(), "it's".to_owned()]),

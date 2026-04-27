@@ -12,7 +12,7 @@ client/UI
 ```
 
 tmux owns process persistence in the first phase. `amux` owns the product model,
-command vocabulary, UI, and future agent-aware state.
+command vocabulary, UI, and future process-aware state.
 
 ## Core Concepts
 
@@ -86,7 +86,7 @@ state.
 - custom PTY daemon
 - plugin system
 - distributed orchestration
-- agent-specific prompt/runtime logic
+- command-specific prompt/runtime logic
 
 Those may become useful later, but they should be driven by a working local and
 remote session client first.

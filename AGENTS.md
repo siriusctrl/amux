@@ -2,12 +2,12 @@ Principles for agents contributing to this repository.
 
 ## Mission
 
-Build a friendly local and remote client for persistent agent sessions.
+Build a friendly local and remote client for persistent terminal sessions.
 
 The project has two goals:
 
 1. Make tmux-backed persistence usable without tmux's interaction model.
-2. Keep the client and state model clean enough for future agent harnesses.
+2. Keep the client and state model clean enough for future automation and harnesses.
 
 ## Core Principles
 
@@ -28,7 +28,7 @@ The project has two goals:
 
 4. **Do not write a terminal emulator early**
    - Use tmux and existing terminal/TUI libraries for the first working path.
-   - Build agent/session control and a better client before replacing the PTY backend.
+   - Build session control and a better client before replacing the PTY backend.
 
 5. **Conventional Commits with real bodies**
    - Use Conventional Commits for every commit.

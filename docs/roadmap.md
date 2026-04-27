@@ -7,7 +7,7 @@ project direction changes.
 
 - Provide a usable CLI for local sessions.
 - Provide a small mouse-friendly TUI dashboard with pane controls.
-- Provide a launcher empty state so users can start Codex or a shell without leaving the TUI.
+- Provide a launcher empty state so users can start a shell session without leaving the dashboard.
 - Hide tmux ids and prefix-key behavior from the normal workflow.
 - Keep command output scriptable.
 
@@ -25,12 +25,11 @@ project direction changes.
 - Add richer pane resizing controls in amux itself.
 - Preserve a simple keyboard fallback for all mouse operations.
 
-## Phase 4: Agent Awareness
+## Phase 4: Process Awareness
 
-- Track whether a pane is running an agent, shell, or other command.
+- Track whether a pane is running a shell, long-running command, agent, or other process.
 - Surface waiting/running/done/error states when they can be detected reliably.
-- Integrate Codex and Claude Code hooks when available.
-- Keep the agent model additive; do not hard-code one provider as the core.
+- Keep command-specific integrations additive; do not hard-code one tool as the core.
 
 ## Phase 5: Direct Backend Evaluation
 

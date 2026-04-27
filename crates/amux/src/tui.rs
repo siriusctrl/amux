@@ -329,18 +329,11 @@ impl TuiState {
         self.launch_action(LAUNCH_ACTIONS[self.selected_launch])
     }
 
-    fn launch_action(&mut self, action: LaunchAction) -> Option<String> {
-        let base_name = match action {
-            LaunchAction::Codex => workspace_base_name(&self.current_dir),
-            LaunchAction::Shell => format!("{}-shell", workspace_base_name(&self.current_dir)),
-        };
+    fn launch_action(&mut self, _action: LaunchAction) -> Option<String> {
+        let base_name = workspace_base_name(&self.current_dir);
         let name = unique_session_name(&base_name, &self.sessions);
-        let command = match action {
-            LaunchAction::Codex => vec!["codex".to_owned()],
-            LaunchAction::Shell => Vec::new(),
-        };
 
-        match tmux::create_session(&name, Some(&self.current_dir), &command) {
+        match tmux::create_session(&name, Some(&self.current_dir), &[]) {
             Ok(()) => {
                 self.refresh_sessions();
                 self.message = format!("created {name}");
@@ -376,8 +369,7 @@ struct ButtonHitbox {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ButtonAction {
-    NewCodex,
-    NewShell,
+    NewSession,
     Attach,
     SplitRight,
     SplitDown,
@@ -388,8 +380,7 @@ enum ButtonAction {
 impl ButtonAction {
     fn label(self) -> &'static str {
         match self {
-            ButtonAction::NewCodex => "Codex",
-            ButtonAction::NewShell => "Shell",
+            ButtonAction::NewSession => "New",
             ButtonAction::Attach => "Attach",
             ButtonAction::SplitRight => "Right",
             ButtonAction::SplitDown => "Down",
@@ -401,27 +392,24 @@ impl ButtonAction {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum LaunchAction {
-    Codex,
-    Shell,
+    Session,
 }
 
 impl LaunchAction {
     fn title(self) -> &'static str {
         match self {
-            LaunchAction::Codex => "Start Codex",
-            LaunchAction::Shell => "Start Shell",
+            LaunchAction::Session => "Start Session",
         }
     }
 
     fn description(self) -> &'static str {
         match self {
-            LaunchAction::Codex => "Create Codex here and attach.",
-            LaunchAction::Shell => "Create a shell here and attach.",
+            LaunchAction::Session => "Create a persistent shell here and attach.",
         }
     }
 }
 
-const LAUNCH_ACTIONS: [LaunchAction; 2] = [LaunchAction::Codex, LaunchAction::Shell];
+const LAUNCH_ACTIONS: [LaunchAction; 1] = [LaunchAction::Session];
 
 fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<Option<String>> {
     let mut state = TuiState::new();
@@ -544,8 +532,7 @@ fn activate_button(state: &mut TuiState, action: ButtonAction) -> Option<String>
     }
 
     match action {
-        ButtonAction::NewCodex => state.launch_action(LaunchAction::Codex),
-        ButtonAction::NewShell => state.launch_action(LaunchAction::Shell),
+        ButtonAction::NewSession => state.launch_action(LaunchAction::Session),
         ButtonAction::Attach => state.selected_session_name(),
         ButtonAction::SplitRight => {
             state.split_selected_pane(SplitDirection::Right);
@@ -599,7 +586,7 @@ fn draw(
             frame.render_stateful_widget(render_panes(state), panes, &mut pane_list_state(state));
             frame.render_widget(render_details(state), details);
             let footer_text = if state.sessions.is_empty() {
-                " Enter start | click starter | [Codex] [Shell] | r | q ".to_owned()
+                " Enter start | click starter | [New] | r | q ".to_owned()
             } else {
                 format!(
                     " {} | Tab | Enter attach | | right | - down | x close | r | q ",
@@ -657,7 +644,7 @@ fn render_sessions(state: &TuiState) -> List<'static> {
 }
 
 fn render_toolbar(state: &TuiState) -> Paragraph<'static> {
-    let launch_actions = [ButtonAction::NewCodex, ButtonAction::NewShell];
+    let launch_actions = [ButtonAction::NewSession];
     let pane_actions = [
         ButtonAction::Attach,
         ButtonAction::SplitRight,
@@ -794,12 +781,12 @@ fn render_details(state: &TuiState) -> Paragraph<'static> {
             ]),
             Line::from(""),
             Line::from("Pick a starter to create and attach a local session."),
-            Line::from("Codex runs `codex`; Shell uses tmux's default shell."),
+            Line::from("The new session uses tmux's default shell."),
         ],
         _ => vec![
             Line::from("No session selected."),
             Line::from(""),
-            Line::from("Choose Start Codex or Start Shell to create one."),
+            Line::from("Choose Start Session to create one."),
         ],
     };
 
@@ -891,7 +878,7 @@ fn select_pane_index(panes: &[Pane], preferred: Option<&str>, fallback: usize) -
 }
 
 fn toolbar_buttons(area: Rect) -> Vec<ButtonHitbox> {
-    let launch_actions = [ButtonAction::NewCodex, ButtonAction::NewShell];
+    let launch_actions = [ButtonAction::NewSession];
     let pane_actions = [
         ButtonAction::Attach,
         ButtonAction::SplitRight,
@@ -964,7 +951,7 @@ fn button_style(state: &TuiState, action: ButtonAction) -> Style {
 
 fn button_enabled(state: &TuiState, action: ButtonAction) -> bool {
     match action {
-        ButtonAction::NewCodex | ButtonAction::NewShell => true,
+        ButtonAction::NewSession => true,
         ButtonAction::Attach => !state.sessions.is_empty(),
         ButtonAction::SplitRight | ButtonAction::SplitDown => !state.panes.is_empty(),
         ButtonAction::ClosePane => state.panes.len() > 1,
@@ -1071,8 +1058,7 @@ mod tests {
             height: 4,
         });
 
-        assert_eq!(hit_button(&buttons, 12, 5), Some(ButtonAction::NewCodex));
-        assert_eq!(hit_button(&buttons, 21, 5), Some(ButtonAction::NewShell));
+        assert_eq!(hit_button(&buttons, 12, 5), Some(ButtonAction::NewSession));
         assert_eq!(hit_button(&buttons, 12, 6), Some(ButtonAction::Attach));
         assert_eq!(hit_button(&buttons, 21, 6), Some(ButtonAction::SplitRight));
         assert_eq!(hit_button(&buttons, 12, 4), None);

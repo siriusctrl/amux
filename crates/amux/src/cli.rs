@@ -9,11 +9,11 @@ use crate::{model::Target, tmux, tui};
 #[command(
     name = "amux",
     version,
-    about = "Friendly client for persistent local and remote agent sessions"
+    about = "Friendly client for persistent local and remote terminal sessions"
 )]
 struct Cli {
     #[command(subcommand)]
-    command: Command,
+    command: Option<Command>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -78,7 +78,7 @@ struct AttachCommand {
 pub fn run() -> Result<()> {
     let cli = Cli::parse();
 
-    match cli.command {
+    match cli.command.unwrap_or(Command::Tui) {
         Command::Doctor => doctor(),
         Command::Target { command } => match command {
             TargetCommand::List => list_targets(),

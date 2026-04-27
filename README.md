@@ -1,11 +1,11 @@
 # amux
 
-Friendly client for persistent local and remote agent sessions.
+Friendly client for persistent local and remote terminal sessions.
 
 ## What It Is
 
-`amux` is a Rust CLI/TUI for running coding agents such as Codex and Claude Code
-inside persistent sessions without exposing tmux's interaction model.
+`amux` is a Rust CLI for running persistent terminal sessions without exposing
+tmux's interaction model.
 
 The first implementation is intentionally tmux-backed:
 
@@ -14,17 +14,16 @@ The first implementation is intentionally tmux-backed:
 - the user-facing controls stay the same across local and remote targets
 - tmux is treated as the session kernel, not the UX
 
-The product goal is a location-transparent agent workspace:
+The product goal is a location-transparent terminal workspace:
 
 ```text
-amux client
+amux
   target: local
   target: ssh://devbox
 
 session
   panes
   persistent PTYs
-  agent status
   attach/detach
   mouse-friendly split control
 ```
@@ -40,10 +39,10 @@ sessions and controlling panes.
 - keep local and remote workflows under one model
 - build the TUI like a focused application, not like a prefix-key multiplexer
 - use existing terminal engines and PTY/session backends before writing new ones
-- keep the agent-facing state model explicit enough for future harnesses
+- keep the state model explicit enough for future automation and harnesses
 
 `amux` is not trying to be a terminal emulator in the first phase. The initial
-target is a better client for tmux-backed agent sessions.
+target is a better client for tmux-backed terminal sessions.
 
 ## Quick Start
 
@@ -63,7 +62,7 @@ cargo run -p amux -- session list
 Create a detached session that runs a command:
 
 ```bash
-cargo run -p amux -- new towerlab --cwd /root/towerlab -- codex
+cargo run -p amux -- new towerlab --cwd /root/towerlab -- bash
 ```
 
 Attach to a session:
@@ -75,12 +74,12 @@ cargo run -p amux -- attach towerlab
 Open the dashboard:
 
 ```bash
-cargo run -p amux -- tui
+cargo run -p amux --
 ```
 
 If no sessions are running, the dashboard opens as a launcher. Press `Enter` or
-click `Start Codex` / `Start Shell` to create a session in the current
-directory and attach to it immediately.
+click `Start Session` to create a shell session in the current directory and
+attach to it immediately.
 
 Dashboard controls:
 
@@ -95,7 +94,7 @@ Enter        attach selected session, or start the selected launcher option
 -            split selected pane down
 x            close selected pane
 Mouse click  select a visible session or pane row
-Mouse click  press Codex / Shell / Attach / Right / Down / Close / Refresh
+Mouse click  press New / Attach / Right / Down / Close / Refresh
 Wheel        move selection in the hovered list
 ```
 
@@ -111,8 +110,12 @@ amux target list
 amux session list
 amux new <NAME> [--cwd <DIR>] [-- <COMMAND>...]
 amux attach <NAME>
+amux
 amux tui
 ```
+
+Running `amux` with no subcommand opens the dashboard. `amux tui` is kept as an
+explicit alias.
 
 Only the local target is implemented today. Remote targets are part of the
 first architectural goal, but the CLI is shaped so local and remote behavior can

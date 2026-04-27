@@ -2,13 +2,13 @@ use assert_cmd::Command;
 use predicates::prelude::*;
 
 #[test]
-fn help_mentions_agent_sessions() {
+fn help_mentions_terminal_sessions() {
     let mut cmd = Command::cargo_bin("amux").unwrap();
     cmd.arg("--help")
         .assert()
         .success()
         .stdout(predicate::str::contains(
-            "persistent local and remote agent sessions",
+            "persistent local and remote terminal sessions",
         ));
 }
 
