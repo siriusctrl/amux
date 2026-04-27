@@ -8,6 +8,7 @@ project direction changes.
 - Provide a usable CLI for local sessions.
 - Provide a small mouse-friendly TUI dashboard with pane controls.
 - Provide a launcher empty state so users can start a shell session without leaving the dashboard.
+- Render attached sessions in amux instead of handing control to the native tmux client.
 - Hide tmux ids and prefix-key behavior from the normal workflow.
 - Keep command output scriptable.
 
@@ -22,12 +23,13 @@ project direction changes.
 
 - Add pane listing and split operations. Done for the local tmux MVP.
 - Support mouse focus and split controls in the TUI. Done for the local tmux MVP.
+- Support amux-rendered pane content and input forwarding. Done for the local tmux MVP.
 - Add richer pane resizing controls in amux itself.
 - Preserve a simple keyboard fallback for all mouse operations.
 
 ## Phase 4: Process Awareness
 
-- Track whether a pane is running a shell, long-running command, agent, or other process.
+- Track whether a pane is running a shell, long-running command, background job, or other process.
 - Surface waiting/running/done/error states when they can be detected reliably.
 - Keep command-specific integrations additive; do not hard-code one tool as the core.
 

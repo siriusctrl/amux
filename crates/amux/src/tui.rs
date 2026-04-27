@@ -372,7 +372,7 @@ struct ButtonHitbox {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ButtonAction {
     NewSession,
-    Attach,
+    Open,
     SplitRight,
     SplitDown,
     ClosePane,
@@ -383,7 +383,7 @@ impl ButtonAction {
     fn label(self) -> &'static str {
         match self {
             ButtonAction::NewSession => "New",
-            ButtonAction::Attach => "Attach",
+            ButtonAction::Open => "Open",
             ButtonAction::SplitRight => "Right",
             ButtonAction::SplitDown => "Down",
             ButtonAction::ClosePane => "Close",
@@ -406,7 +406,7 @@ impl LaunchAction {
 
     fn description(self) -> &'static str {
         match self {
-            LaunchAction::Session => "Create a persistent shell here and attach.",
+            LaunchAction::Session => "Create a persistent shell here and open it.",
         }
     }
 }
@@ -465,7 +465,7 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<Opt
                 KeyCode::Char(ch) if state.command_mode => match handle_command_key(&mut state, ch)
                 {
                     CommandKeyAction::Continue => dirty = true,
-                    CommandKeyAction::Attach(session) => return Ok(Some(session)),
+                    CommandKeyAction::Open(session) => return Ok(Some(session)),
                     CommandKeyAction::Quit => return Ok(None),
                 },
                 KeyCode::Enter if state.sessions.is_empty() => {
@@ -535,7 +535,7 @@ fn activate_button(state: &mut TuiState, action: ButtonAction) -> Option<String>
 
     match action {
         ButtonAction::NewSession => state.launch_action(LaunchAction::Session),
-        ButtonAction::Attach => state.selected_session_name(),
+        ButtonAction::Open => state.selected_session_name(),
         ButtonAction::SplitRight => {
             state.split_selected_pane(SplitDirection::Right);
             None
@@ -557,7 +557,7 @@ fn activate_button(state: &mut TuiState, action: ButtonAction) -> Option<String>
 
 enum CommandKeyAction {
     Continue,
-    Attach(String),
+    Open(String),
     Quit,
 }
 
@@ -567,14 +567,14 @@ fn handle_command_key(state: &mut TuiState, ch: char) -> CommandKeyAction {
             state.command_mode = false;
             state
                 .launch_action(LaunchAction::Session)
-                .map(CommandKeyAction::Attach)
+                .map(CommandKeyAction::Open)
                 .unwrap_or(CommandKeyAction::Continue)
         }
         'a' => {
             state.command_mode = false;
             state
                 .selected_session_name()
-                .map(CommandKeyAction::Attach)
+                .map(CommandKeyAction::Open)
                 .unwrap_or_else(|| {
                     state.message = "no session selected".to_owned();
                     CommandKeyAction::Continue
@@ -652,14 +652,14 @@ fn draw(
 
 fn footer_text(state: &TuiState) -> String {
     if state.command_mode {
-        return " COMMAND | n new | a attach | v right | h down | x close | r refresh | q quit | Esc cancel ".to_owned();
+        return " COMMAND | n new | a open | v right | h down | x close | r refresh | q quit | Esc cancel ".to_owned();
     }
 
     if state.sessions.is_empty() {
         " Enter start | click starter | Ctrl-A commands ".to_owned()
     } else {
         format!(
-            " {} | Ctrl-A commands | Tab focus | Enter attach | mouse controls ",
+            " {} | Ctrl-A commands | Tab focus | Enter open | mouse controls ",
             state.message
         )
     }
@@ -709,7 +709,7 @@ fn render_sessions(state: &TuiState) -> List<'static> {
 fn render_toolbar(state: &TuiState) -> Paragraph<'static> {
     let launch_actions = [ButtonAction::NewSession];
     let pane_actions = [
-        ButtonAction::Attach,
+        ButtonAction::Open,
         ButtonAction::SplitRight,
         ButtonAction::SplitDown,
         ButtonAction::ClosePane,
@@ -843,8 +843,8 @@ fn render_details(state: &TuiState) -> Paragraph<'static> {
                 ),
             ]),
             Line::from(""),
-            Line::from("Pick a starter to create and attach a local session."),
-            Line::from("The new session uses tmux's default shell."),
+            Line::from("Pick a starter to create and open a local session."),
+            Line::from("The new session uses your default shell."),
         ],
         _ => vec![
             Line::from("No session selected."),
@@ -943,7 +943,7 @@ fn select_pane_index(panes: &[Pane], preferred: Option<&str>, fallback: usize) -
 fn toolbar_buttons(area: Rect) -> Vec<ButtonHitbox> {
     let launch_actions = [ButtonAction::NewSession];
     let pane_actions = [
-        ButtonAction::Attach,
+        ButtonAction::Open,
         ButtonAction::SplitRight,
         ButtonAction::SplitDown,
         ButtonAction::ClosePane,
@@ -1015,7 +1015,7 @@ fn button_style(state: &TuiState, action: ButtonAction) -> Style {
 fn button_enabled(state: &TuiState, action: ButtonAction) -> bool {
     match action {
         ButtonAction::NewSession => true,
-        ButtonAction::Attach => !state.sessions.is_empty(),
+        ButtonAction::Open => !state.sessions.is_empty(),
         ButtonAction::SplitRight | ButtonAction::SplitDown => !state.panes.is_empty(),
         ButtonAction::ClosePane => state.panes.len() > 1,
         ButtonAction::Refresh => true,
@@ -1122,7 +1122,7 @@ mod tests {
         });
 
         assert_eq!(hit_button(&buttons, 12, 5), Some(ButtonAction::NewSession));
-        assert_eq!(hit_button(&buttons, 12, 6), Some(ButtonAction::Attach));
+        assert_eq!(hit_button(&buttons, 12, 6), Some(ButtonAction::Open));
         assert_eq!(hit_button(&buttons, 21, 6), Some(ButtonAction::SplitRight));
         assert_eq!(hit_button(&buttons, 12, 4), None);
     }
@@ -1167,6 +1167,9 @@ mod tests {
                 height: 24,
                 left: 0,
                 top: 0,
+                cursor_x: 0,
+                cursor_y: 0,
+                cursor_visible: true,
             },
             Pane {
                 id: "%2".to_owned(),
@@ -1178,6 +1181,9 @@ mod tests {
                 height: 24,
                 left: 41,
                 top: 0,
+                cursor_x: 0,
+                cursor_y: 0,
+                cursor_visible: true,
             },
         ];
 

@@ -1,5 +1,6 @@
 mod cli;
 mod model;
+mod session_view;
 mod tmux;
 mod tui;
 

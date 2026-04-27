@@ -1,7 +1,4 @@
-use std::{
-    path::Path,
-    process::{Command, ExitStatus, Stdio},
-};
+use std::{path::Path, process::Command};
 
 use anyhow::{Context, Result, anyhow, bail};
 
@@ -52,7 +49,7 @@ pub fn list_panes(session: &str) -> Result<Vec<Pane>> {
             "-t",
             session,
             "-F",
-            "#{pane_id}\t#{pane_index}\t#{pane_active}\t#{pane_current_command}\t#{pane_current_path}\t#{pane_width}\t#{pane_height}\t#{pane_left}\t#{pane_top}",
+            "#{pane_id}\t#{pane_index}\t#{pane_active}\t#{pane_current_command}\t#{pane_current_path}\t#{pane_width}\t#{pane_height}\t#{pane_left}\t#{pane_top}\t#{cursor_x}\t#{cursor_y}\t#{cursor_flag}",
         ])
         .output()
         .with_context(|| format!("failed to list panes for tmux session {session}"))?;
@@ -81,18 +78,6 @@ pub fn create_session(name: &str, cwd: Option<&Path>, command: &[String]) -> Res
         .output()
         .with_context(|| format!("failed to create tmux session {name}"))?;
     ensure_success("tmux new-session", &output)
-}
-
-pub fn attach_session(name: &str) -> Result<ExitStatus> {
-    validate_session_name(name)?;
-    enable_mouse(name)?;
-    Command::new("tmux")
-        .args(["attach-session", "-t", name])
-        .stdin(Stdio::inherit())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .status()
-        .with_context(|| format!("failed to attach tmux session {name}"))
 }
 
 pub fn select_pane(pane_id: &str) -> Result<()> {
@@ -133,13 +118,60 @@ pub fn kill_pane(pane_id: &str) -> Result<()> {
     ensure_success("tmux kill-pane", &output)
 }
 
-pub fn enable_mouse(session: &str) -> Result<()> {
+pub fn resize_window(session: &str, width: u16, height: u16) -> Result<()> {
     validate_session_name(session)?;
+    let width = width.max(1).to_string();
+    let height = height.max(1).to_string();
     let output = Command::new("tmux")
-        .args(["set-option", "-t", session, "mouse", "on"])
+        .args(["resize-window", "-t", session, "-x", &width, "-y", &height])
         .output()
-        .with_context(|| format!("failed to enable mouse for tmux session {session}"))?;
-    ensure_success("tmux set-option mouse", &output)
+        .with_context(|| format!("failed to resize tmux session {session}"))?;
+    ensure_success("tmux resize-window", &output)
+}
+
+pub fn capture_pane(pane_id: &str, height: usize, scroll_offset: usize) -> Result<String> {
+    validate_pane_id(pane_id)?;
+
+    let mut tmux = Command::new("tmux");
+    tmux.args(["capture-pane", "-e", "-p", "-N", "-t", pane_id]);
+
+    if height > 0 && scroll_offset > 0 {
+        let start = format!("-{scroll_offset}");
+        let end = (height.saturating_sub(1) as isize) - (scroll_offset as isize);
+        tmux.args(["-S", &start, "-E", &end.to_string()]);
+    }
+
+    let output = tmux
+        .output()
+        .with_context(|| format!("failed to capture tmux pane {pane_id}"))?;
+    ensure_success("tmux capture-pane", &output)?;
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+pub fn send_literal(pane_id: &str, text: &str) -> Result<()> {
+    validate_pane_id(pane_id)?;
+    if text.is_empty() {
+        return Ok(());
+    }
+
+    let output = Command::new("tmux")
+        .args(["send-keys", "-t", pane_id, "-l", text])
+        .output()
+        .with_context(|| format!("failed to send text to tmux pane {pane_id}"))?;
+    ensure_success("tmux send-keys -l", &output)
+}
+
+pub fn send_key(pane_id: &str, key: &str) -> Result<()> {
+    validate_pane_id(pane_id)?;
+    if key.trim().is_empty() {
+        bail!("key name cannot be empty");
+    }
+
+    let output = Command::new("tmux")
+        .args(["send-keys", "-t", pane_id, key])
+        .output()
+        .with_context(|| format!("failed to send key {key} to tmux pane {pane_id}"))?;
+    ensure_success("tmux send-keys", &output)
 }
 
 fn parse_session_line(line: &str) -> Result<Session> {
@@ -167,7 +199,7 @@ fn parse_session_line(line: &str) -> Result<Session> {
 
 fn parse_pane_line(line: &str) -> Result<Pane> {
     let parts = line.split('\t').collect::<Vec<_>>();
-    if parts.len() != 9 {
+    if parts.len() != 12 {
         bail!("unexpected tmux pane row: {line}");
     }
 
@@ -187,6 +219,9 @@ fn parse_pane_line(line: &str) -> Result<Pane> {
         height: parse_usize_field("pane height", parts[6])?,
         left: parse_usize_field("pane left", parts[7])?,
         top: parse_usize_field("pane top", parts[8])?,
+        cursor_x: parse_usize_field("cursor x", parts[9])?,
+        cursor_y: parse_usize_field("cursor y", parts[10])?,
+        cursor_visible: parse_bool_field("cursor flag", parts[11])?,
     })
 }
 
@@ -194,6 +229,14 @@ fn parse_usize_field(label: &str, value: &str) -> Result<usize> {
     value
         .parse::<usize>()
         .with_context(|| format!("invalid tmux {label}: {value}"))
+}
+
+fn parse_bool_field(label: &str, value: &str) -> Result<bool> {
+    match value {
+        "0" => Ok(false),
+        "1" => Ok(true),
+        value => bail!("invalid tmux {label}: {value}"),
+    }
 }
 
 fn validate_session_name(name: &str) -> Result<()> {
@@ -274,7 +317,7 @@ mod tests {
 
     #[test]
     fn parses_tmux_pane_rows() {
-        let pane = parse_pane_line("%1\t1\t1\tbash\t/root/amux\t80\t24\t0\t0").unwrap();
+        let pane = parse_pane_line("%1\t1\t1\tbash\t/root/amux\t80\t24\t0\t0\t12\t3\t1").unwrap();
         assert_eq!(pane.id, "%1");
         assert_eq!(pane.index, 1);
         assert!(pane.active);
@@ -284,6 +327,9 @@ mod tests {
         assert_eq!(pane.height, 24);
         assert_eq!(pane.left, 0);
         assert_eq!(pane.top, 0);
+        assert_eq!(pane.cursor_x, 12);
+        assert_eq!(pane.cursor_y, 3);
+        assert!(pane.cursor_visible);
     }
 
     #[test]
@@ -296,8 +342,9 @@ mod tests {
     #[test]
     fn rejects_malformed_pane_rows() {
         assert!(parse_pane_line("%1\t1").is_err());
-        assert!(parse_pane_line("%1\tone\t1\tbash\t/tmp\t80\t24\t0\t0").is_err());
-        assert!(parse_pane_line("%1\t1\tmaybe\tbash\t/tmp\t80\t24\t0\t0").is_err());
+        assert!(parse_pane_line("%1\tone\t1\tbash\t/tmp\t80\t24\t0\t0\t0\t0\t1").is_err());
+        assert!(parse_pane_line("%1\t1\tmaybe\tbash\t/tmp\t80\t24\t0\t0\t0\t0\t1").is_err());
+        assert!(parse_pane_line("%1\t1\t1\tbash\t/tmp\t80\t24\t0\t0\t0\t0\tmaybe").is_err());
     }
 
     #[test]

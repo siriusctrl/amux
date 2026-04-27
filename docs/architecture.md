@@ -54,10 +54,12 @@ Implemented operations:
 - check tmux availability
 - list sessions
 - create detached sessions
-- attach to sessions
 - list panes for the selected session
 - select, split, and close panes
-- enable tmux mouse support before attach
+- resize tmux windows to match the amux viewport
+- capture styled pane contents for amux rendering
+- read pane cursor positions from tmux formats
+- forward text and key input to the selected pane
 - create starter sessions from the TUI launcher
 
 This keeps the first version useful without committing to tmux as the permanent
@@ -73,6 +75,11 @@ The UI should follow focused application behavior:
 - mouse and keyboard controls
 - direct session selection
 - direct pane selection and split controls
+- amux-rendered session views instead of the native tmux client
+- session-view borders are outside tmux's content grid, with tmux resized to the inner area
+- session-view borders use a softer rounded outer frame
+- separator lines are drawn in tmux's inter-pane gap cells, never over pane content
+- selected panes should carry focus through adjacent border/separator color, not extra pane chrome
 - visible launcher actions when no sessions exist
 - minimal global key grammar
 - no tmux prefix-key model

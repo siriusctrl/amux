@@ -29,9 +29,9 @@ session
 ```
 
 This repository is at the early MVP stage. The current CLI checks tmux
-availability, lists local tmux sessions, creates detached local sessions,
-attaches to a session, and opens a mouse-friendly dashboard for selecting
-sessions and controlling panes.
+availability, lists local tmux sessions, creates detached local sessions, opens
+an amux-rendered session view, and provides a mouse-friendly dashboard for
+selecting sessions and controlling panes.
 
 ## Design Stance
 
@@ -65,7 +65,7 @@ Create a detached session that runs a command:
 cargo run -p amux -- new towerlab --cwd /root/towerlab -- bash
 ```
 
-Attach to a session:
+Open a session:
 
 ```bash
 cargo run -p amux -- attach towerlab
@@ -79,23 +79,23 @@ cargo run -p amux --
 
 If no sessions are running, the dashboard opens as a launcher. Press `Enter` or
 click `Start Session` to create a shell session in the current directory and
-attach to it immediately.
+open it immediately.
 
 Dashboard controls:
 
 ```text
 Mouse click        select a visible session or pane row
-Mouse click        press New / Attach / Right / Down / Close / Refresh
+Mouse click        press New / Open / Right / Down / Close / Refresh
 Wheel              move selection in the hovered list
 Tab                switch keyboard focus between sessions and panes
 Up / Down          move selection in the focused list
-Enter              attach selected session, or start the selected launcher option
+Enter              open selected session, or start the selected launcher option
 Esc                quit or cancel command mode
 Ctrl-A             enter command mode
 
 Command mode:
 n                  new session
-a                  attach selected session
+a                  open selected session
 v                  split selected pane right
 h                  split selected pane down
 x                  close selected pane
@@ -103,9 +103,36 @@ r                  refresh sessions
 q                  quit dashboard
 ```
 
-`amux attach` enables tmux mouse support for the selected session before
-attaching, so tmux itself can use mouse selection and pane resizing while the
-session is attached.
+`amux attach` opens the amux session view. tmux stays behind the backend
+boundary; amux renders panes, forwards normal input to the selected pane, and
+uses `Ctrl-A` only for amux-level commands.
+
+The session view preserves common ANSI colors from pane output and maps the
+selected pane's tmux cursor position back to the visible terminal cursor.
+Pane content is rendered inside an amux border; tmux is resized to the inner
+content area so pane output and cursor coordinates stay aligned. The selected
+pane's adjacent borders are highlighted. The outer frame uses rounded corners,
+and split separators are drawn in tmux's gap cells without hard-connecting to
+the outer frame.
+
+Session view controls:
+
+```text
+Typing / Enter     send input to the selected pane
+Mouse click        select a pane
+Wheel              scroll the hovered pane history
+Ctrl-A             enter command mode
+
+Command mode:
+v                  split selected pane right
+h                  split selected pane down
+x                  close selected pane
+r                  refresh
+q                  detach from the session view
+Esc                cancel command mode
+```
+
+When the last pane exits, the session view closes and restores the terminal.
 
 ## Current CLI
 
@@ -149,7 +176,7 @@ cargo clippy --all-targets -- -D warnings
 ```
 
 For TUI changes, also run the built binary in a real terminal or PTY and verify
-mouse, resize, refresh, quit, and attach behavior.
+mouse, resize, refresh, quit, dashboard open, and session-view input behavior.
 
 ## License
 

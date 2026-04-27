@@ -5,9 +5,9 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Friendly client for persistent local and remote agent sessions"
+description = "Friendly client for persistent local and remote terminal sessions"
 readme = "../../README.md"
-keywords = ["tmux", "terminal", "agent", "tui", "cli"]
+keywords = ["tmux", "terminal", "sessions", "tui", "cli"]
 categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]

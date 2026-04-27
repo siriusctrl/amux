@@ -59,6 +59,9 @@ pub struct Pane {
     pub height: usize,
     pub left: usize,
     pub top: usize,
+    pub cursor_x: usize,
+    pub cursor_y: usize,
+    pub cursor_visible: bool,
 }
 
 impl Pane {
@@ -107,6 +110,9 @@ mod tests {
             height: 24,
             left: 0,
             top: 0,
+            cursor_x: 2,
+            cursor_y: 3,
+            cursor_visible: true,
         };
         assert_eq!(pane.display_status(), "active");
     }

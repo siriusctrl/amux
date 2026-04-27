@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use anyhow::{Result, bail};
 use clap::{Parser, Subcommand};
 
-use crate::{model::Target, tmux, tui};
+use crate::{model::Target, session_view, tmux, tui};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -36,7 +36,7 @@ enum Command {
     /// Create a detached session.
     New(NewCommand),
 
-    /// Attach to an existing session.
+    /// Open an existing session.
     Attach(AttachCommand),
 }
 
@@ -131,19 +131,12 @@ fn new_session(command: NewCommand) -> Result<()> {
 }
 
 fn attach_session(command: AttachCommand) -> Result<()> {
-    let status = tmux::attach_session(&command.name)?;
-    if !status.success() {
-        bail!("tmux attach exited with {status}");
-    }
-    Ok(())
+    session_view::run(&command.name)
 }
 
 fn run_dashboard() -> Result<()> {
     if let Some(session) = tui::run()? {
-        let status = tmux::attach_session(&session)?;
-        if !status.success() {
-            bail!("tmux attach exited with {status}");
-        }
+        session_view::run(&session)?;
     }
     Ok(())
 }
