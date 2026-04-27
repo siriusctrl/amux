@@ -22,6 +22,8 @@ cargo run -p amux -- tui
 Verify:
 
 - the alternate screen is restored after `q` or `Esc`
+- with no sessions, the launcher shows `Start Codex` and `Start Shell`
+- `Enter` on a launcher item creates a session in the current directory and attaches
 - `r` refreshes the session list
 - `Tab` switches keyboard focus between session and pane lists
 - arrow keys and `j`/`k` move selection in the focused list
@@ -30,6 +32,7 @@ Verify:
 - mouse click on `Right` creates a side-by-side pane
 - mouse click on `Down` creates a stacked pane
 - mouse click on `Close` closes the selected pane when it is not the last pane
+- mouse click on `Codex` or `Shell` creates and attaches a starter session
 - terminal resize redraws cleanly
 - `Enter` or the `Attach` button exits the dashboard and attaches the selected session
 - attached tmux sessions have mouse support enabled for pane selection and resizing

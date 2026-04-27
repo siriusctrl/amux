@@ -78,6 +78,10 @@ Open the dashboard:
 cargo run -p amux -- tui
 ```
 
+If no sessions are running, the dashboard opens as a launcher. Press `Enter` or
+click `Start Codex` / `Start Shell` to create a session in the current
+directory and attach to it immediately.
+
 Dashboard controls:
 
 ```text
@@ -86,12 +90,12 @@ r            refresh sessions
 Tab          switch keyboard focus between sessions and panes
 j / Down     select next session or pane
 k / Up       select previous session or pane
-Enter        attach selected session
+Enter        attach selected session, or start the selected launcher option
 |            split selected pane right
 -            split selected pane down
 x            close selected pane
 Mouse click  select a visible session or pane row
-Mouse click  press Attach / Right / Down / Close / Refresh
+Mouse click  press Codex / Shell / Attach / Right / Down / Close / Refresh
 Wheel        move selection in the hovered list
 ```
 

@@ -58,6 +58,7 @@ Implemented operations:
 - list panes for the selected session
 - select, split, and close panes
 - enable tmux mouse support before attach
+- create starter sessions from the TUI launcher
 
 This keeps the first version useful without committing to tmux as the permanent
 backend.
@@ -72,6 +73,7 @@ The UI should follow focused application behavior:
 - mouse and keyboard controls
 - direct session selection
 - direct pane selection and split controls
+- visible launcher actions when no sessions exist
 - minimal global key grammar
 - no tmux prefix-key model
 

@@ -1,5 +1,8 @@
 use std::{
+    collections::HashSet,
+    env,
     io::{self, Write},
+    path::{Path, PathBuf},
     time::Duration,
 };
 
@@ -85,8 +88,10 @@ struct TuiState {
     selected_session: usize,
     panes: Vec<Pane>,
     selected_pane: usize,
+    selected_launch: usize,
     focus: Focus,
     message: String,
+    current_dir: PathBuf,
 }
 
 impl TuiState {
@@ -96,8 +101,10 @@ impl TuiState {
             selected_session: 0,
             panes: Vec::new(),
             selected_pane: 0,
+            selected_launch: 0,
             focus: Focus::Sessions,
             message: "loading sessions".to_owned(),
+            current_dir: env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
         };
         state.refresh_sessions();
         state
@@ -115,6 +122,11 @@ impl TuiState {
                     self.selected_session,
                 );
                 self.refresh_panes(previous_pane);
+                if self.sessions.is_empty() {
+                    self.focus = Focus::Launcher;
+                } else if self.focus == Focus::Launcher {
+                    self.focus = Focus::Sessions;
+                }
                 self.message = format!(
                     "{} local sessions, {} panes",
                     self.sessions.len(),
@@ -126,6 +138,7 @@ impl TuiState {
                 self.panes.clear();
                 self.selected_session = 0;
                 self.selected_pane = 0;
+                self.focus = Focus::Launcher;
                 self.message = format!("failed to list sessions: {error}");
             }
         }
@@ -192,6 +205,7 @@ impl TuiState {
 
     fn select_next_pane(&mut self) {
         if self.panes.is_empty() {
+            self.select_next_launch();
             return;
         }
         self.selected_pane = (self.selected_pane + 1).min(self.panes.len() - 1);
@@ -200,12 +214,20 @@ impl TuiState {
     }
 
     fn select_previous_pane(&mut self) {
+        if self.panes.is_empty() {
+            self.select_previous_launch();
+            return;
+        }
         self.selected_pane = self.selected_pane.saturating_sub(1);
         self.focus = Focus::Panes;
         self.select_current_pane_in_tmux();
     }
 
     fn select_pane_row(&mut self, row: usize) {
+        if self.panes.is_empty() {
+            self.select_launch_row(row);
+            return;
+        }
         if row < self.panes.len() {
             self.selected_pane = row;
             self.focus = Focus::Panes;
@@ -274,10 +296,61 @@ impl TuiState {
     }
 
     fn toggle_focus(&mut self) {
+        if self.sessions.is_empty() {
+            self.focus = Focus::Launcher;
+            return;
+        }
         self.focus = match self.focus {
             Focus::Sessions => Focus::Panes,
             Focus::Panes => Focus::Sessions,
+            Focus::Launcher => Focus::Sessions,
         };
+    }
+
+    fn select_next_launch(&mut self) {
+        self.selected_launch = (self.selected_launch + 1).min(LAUNCH_ACTIONS.len() - 1);
+        self.focus = Focus::Launcher;
+    }
+
+    fn select_previous_launch(&mut self) {
+        self.selected_launch = self.selected_launch.saturating_sub(1);
+        self.focus = Focus::Launcher;
+    }
+
+    fn select_launch_row(&mut self, row: usize) {
+        if row < LAUNCH_ACTIONS.len() {
+            self.selected_launch = row;
+            self.focus = Focus::Launcher;
+            self.message = format!("selected {}", LAUNCH_ACTIONS[row].title());
+        }
+    }
+
+    fn launch_selected(&mut self) -> Option<String> {
+        self.launch_action(LAUNCH_ACTIONS[self.selected_launch])
+    }
+
+    fn launch_action(&mut self, action: LaunchAction) -> Option<String> {
+        let base_name = match action {
+            LaunchAction::Codex => workspace_base_name(&self.current_dir),
+            LaunchAction::Shell => format!("{}-shell", workspace_base_name(&self.current_dir)),
+        };
+        let name = unique_session_name(&base_name, &self.sessions);
+        let command = match action {
+            LaunchAction::Codex => vec!["codex".to_owned()],
+            LaunchAction::Shell => Vec::new(),
+        };
+
+        match tmux::create_session(&name, Some(&self.current_dir), &command) {
+            Ok(()) => {
+                self.refresh_sessions();
+                self.message = format!("created {name}");
+                Some(name)
+            }
+            Err(error) => {
+                self.message = format!("failed to create {name}: {error}");
+                None
+            }
+        }
     }
 }
 
@@ -285,6 +358,7 @@ impl TuiState {
 enum Focus {
     Sessions,
     Panes,
+    Launcher,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -302,6 +376,8 @@ struct ButtonHitbox {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ButtonAction {
+    NewCodex,
+    NewShell,
     Attach,
     SplitRight,
     SplitDown,
@@ -312,6 +388,8 @@ enum ButtonAction {
 impl ButtonAction {
     fn label(self) -> &'static str {
         match self {
+            ButtonAction::NewCodex => "Codex",
+            ButtonAction::NewShell => "Shell",
             ButtonAction::Attach => "Attach",
             ButtonAction::SplitRight => "Right",
             ButtonAction::SplitDown => "Down",
@@ -320,6 +398,30 @@ impl ButtonAction {
         }
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LaunchAction {
+    Codex,
+    Shell,
+}
+
+impl LaunchAction {
+    fn title(self) -> &'static str {
+        match self {
+            LaunchAction::Codex => "Start Codex",
+            LaunchAction::Shell => "Start Shell",
+        }
+    }
+
+    fn description(self) -> &'static str {
+        match self {
+            LaunchAction::Codex => "Create Codex here and attach.",
+            LaunchAction::Shell => "Create a shell here and attach.",
+        }
+    }
+}
+
+const LAUNCH_ACTIONS: [LaunchAction; 2] = [LaunchAction::Codex, LaunchAction::Shell];
 
 fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<Option<String>> {
     let mut state = TuiState::new();
@@ -352,6 +454,7 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<Opt
                     match state.focus {
                         Focus::Sessions => state.select_next_session(),
                         Focus::Panes => state.select_next_pane(),
+                        Focus::Launcher => state.select_next_launch(),
                     }
                     dirty = true;
                 }
@@ -359,6 +462,7 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<Opt
                     match state.focus {
                         Focus::Sessions => state.select_previous_session(),
                         Focus::Panes => state.select_previous_pane(),
+                        Focus::Launcher => state.select_previous_launch(),
                     }
                     dirty = true;
                 }
@@ -372,6 +476,12 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<Opt
                 }
                 KeyCode::Char('x') => {
                     state.close_selected_pane();
+                    dirty = true;
+                }
+                KeyCode::Enter if state.sessions.is_empty() => {
+                    if let Some(session) = state.launch_selected() {
+                        return Ok(Some(session));
+                    }
                     dirty = true;
                 }
                 KeyCode::Enter => return Ok(state.selected_session_name()),
@@ -408,7 +518,14 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<Opt
                     } else if rect_contains(hitboxes.panes, mouse.column, mouse.row)
                         && let Some(row) = row_from_mouse(hitboxes.panes, mouse.row)
                     {
-                        state.select_pane_row(row);
+                        if state.sessions.is_empty() {
+                            state.select_launch_row(row / 2);
+                            if let Some(session) = state.launch_selected() {
+                                return Ok(Some(session));
+                            }
+                        } else {
+                            state.select_pane_row(row);
+                        }
                         dirty = true;
                     }
                 }
@@ -421,7 +538,14 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<Opt
 }
 
 fn activate_button(state: &mut TuiState, action: ButtonAction) -> Option<String> {
+    if !button_enabled(state, action) {
+        state.message = format!("{} is unavailable", action.label());
+        return None;
+    }
+
     match action {
+        ButtonAction::NewCodex => state.launch_action(LaunchAction::Codex),
+        ButtonAction::NewShell => state.launch_action(LaunchAction::Shell),
         ButtonAction::Attach => state.selected_session_name(),
         ButtonAction::SplitRight => {
             state.split_selected_pane(SplitDirection::Right);
@@ -456,7 +580,7 @@ fn draw(
                 Layout::horizontal([Constraint::Percentage(34), Constraint::Percentage(66)])
                     .areas(body);
             let [toolbar, panes, details] = Layout::vertical([
-                Constraint::Length(3),
+                Constraint::Length(4),
                 Constraint::Min(8),
                 Constraint::Length(8),
             ])
@@ -474,12 +598,16 @@ fn draw(
             frame.render_widget(render_toolbar(state), toolbar);
             frame.render_stateful_widget(render_panes(state), panes, &mut pane_list_state(state));
             frame.render_widget(render_details(state), details);
-            frame.render_widget(
-                Paragraph::new(format!(
+            let footer_text = if state.sessions.is_empty() {
+                " Enter start | click starter | [Codex] [Shell] | r | q ".to_owned()
+            } else {
+                format!(
                     " {} | Tab | Enter attach | | right | - down | x close | r | q ",
                     state.message
-                ))
-                .style(Style::default().fg(Color::DarkGray)),
+                )
+            };
+            frame.render_widget(
+                Paragraph::new(footer_text).style(Style::default().fg(Color::DarkGray)),
                 footer,
             );
         })
@@ -491,7 +619,7 @@ fn render_sessions(state: &TuiState) -> List<'static> {
     let title = format!(" sessions | {} ", focus_label(state.focus, Focus::Sessions));
     let items = if state.sessions.is_empty() {
         vec![ListItem::new(Line::from(vec![Span::styled(
-            "No sessions. Run `amux new work -- codex`.",
+            "No sessions yet. Choose a starter on the right.",
             Style::default().fg(Color::DarkGray),
         )]))]
     } else {
@@ -529,24 +657,21 @@ fn render_sessions(state: &TuiState) -> List<'static> {
 }
 
 fn render_toolbar(state: &TuiState) -> Paragraph<'static> {
-    let actions = [
+    let launch_actions = [ButtonAction::NewCodex, ButtonAction::NewShell];
+    let pane_actions = [
         ButtonAction::Attach,
         ButtonAction::SplitRight,
         ButtonAction::SplitDown,
         ButtonAction::ClosePane,
         ButtonAction::Refresh,
     ];
-    let mut spans = Vec::new();
 
-    for action in actions {
-        spans.push(Span::styled(
-            button_label(action),
-            button_style(state, action),
-        ));
-        spans.push(Span::raw(" "));
-    }
+    let lines = vec![
+        render_button_line(state, &launch_actions),
+        render_button_line(state, &pane_actions),
+    ];
 
-    Paragraph::new(Line::from(spans)).block(
+    Paragraph::new(lines).block(
         Block::default()
             .title(" actions ")
             .borders(Borders::ALL)
@@ -555,6 +680,10 @@ fn render_toolbar(state: &TuiState) -> Paragraph<'static> {
 }
 
 fn render_panes(state: &TuiState) -> List<'static> {
+    if state.sessions.is_empty() {
+        return render_launcher(state);
+    }
+
     let title = format!(" panes | {} ", focus_label(state.focus, Focus::Panes));
     let items = if state.panes.is_empty() {
         vec![ListItem::new(Line::from(vec![Span::styled(
@@ -653,10 +782,24 @@ fn render_details(state: &TuiState) -> Paragraph<'static> {
             Line::from(""),
             Line::from("No pane data is available for this session."),
         ],
+        _ if state.sessions.is_empty() => vec![
+            Line::from(vec![
+                Span::styled("workspace ", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    state.current_dir.display().to_string(),
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ]),
+            Line::from(""),
+            Line::from("Pick a starter to create and attach a local session."),
+            Line::from("Codex runs `codex`; Shell uses tmux's default shell."),
+        ],
         _ => vec![
             Line::from("No session selected."),
             Line::from(""),
-            Line::from("Create one with `amux new work -- codex`."),
+            Line::from("Choose Start Codex or Start Shell to create one."),
         ],
     };
 
@@ -678,10 +821,55 @@ fn session_list_state(state: &TuiState) -> ListState {
 
 fn pane_list_state(state: &TuiState) -> ListState {
     let mut list_state = ListState::default();
-    if !state.panes.is_empty() {
+    if state.sessions.is_empty() {
+        list_state.select(Some(state.selected_launch));
+    } else if !state.panes.is_empty() {
         list_state.select(Some(state.selected_pane));
     }
     list_state
+}
+
+fn render_button_line(state: &TuiState, actions: &[ButtonAction]) -> Line<'static> {
+    let mut spans = Vec::new();
+    for action in actions {
+        spans.push(Span::styled(
+            button_label(*action),
+            button_style(state, *action),
+        ));
+        spans.push(Span::raw(" "));
+    }
+    Line::from(spans)
+}
+
+fn render_launcher(state: &TuiState) -> List<'static> {
+    let title = format!(" start | {} ", focus_label(state.focus, Focus::Launcher));
+    let items = LAUNCH_ACTIONS
+        .iter()
+        .map(|action| {
+            ListItem::new(vec![
+                Line::from(Span::styled(
+                    action.title(),
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                )),
+                Line::from(Span::styled(
+                    action.description(),
+                    Style::default().fg(Color::DarkGray),
+                )),
+            ])
+        })
+        .collect::<Vec<_>>();
+
+    List::new(items)
+        .block(
+            Block::default()
+                .title(title)
+                .borders(Borders::ALL)
+                .border_style(border_style(state.focus, Focus::Launcher)),
+        )
+        .highlight_style(Style::default().bg(Color::DarkGray).fg(Color::White))
+        .highlight_symbol("> ")
 }
 
 fn select_index_by_name(sessions: &[Session], name: Option<&str>, fallback: usize) -> usize {
@@ -703,29 +891,34 @@ fn select_pane_index(panes: &[Pane], preferred: Option<&str>, fallback: usize) -
 }
 
 fn toolbar_buttons(area: Rect) -> Vec<ButtonHitbox> {
-    let actions = [
+    let launch_actions = [ButtonAction::NewCodex, ButtonAction::NewShell];
+    let pane_actions = [
         ButtonAction::Attach,
         ButtonAction::SplitRight,
         ButtonAction::SplitDown,
         ButtonAction::ClosePane,
         ButtonAction::Refresh,
     ];
+    let rows = [&launch_actions[..], &pane_actions[..]];
     let mut buttons = Vec::new();
-    let mut x = area.x.saturating_add(2);
-    let y = area.y.saturating_add(1);
 
-    for action in actions {
-        let width = button_label(action).chars().count() as u16;
-        buttons.push(ButtonHitbox {
-            area: Rect {
-                x,
-                y,
-                width,
-                height: 1,
-            },
-            action,
-        });
-        x = x.saturating_add(width).saturating_add(1);
+    for (row_index, actions) in rows.iter().enumerate() {
+        let mut x = area.x.saturating_add(2);
+        let y = area.y.saturating_add(1 + row_index as u16);
+
+        for action in *actions {
+            let width = button_label(*action).chars().count() as u16;
+            buttons.push(ButtonHitbox {
+                area: Rect {
+                    x,
+                    y,
+                    width,
+                    height: 1,
+                },
+                action: *action,
+            });
+            x = x.saturating_add(width).saturating_add(1);
+        }
     }
 
     buttons
@@ -771,6 +964,7 @@ fn button_style(state: &TuiState, action: ButtonAction) -> Style {
 
 fn button_enabled(state: &TuiState, action: ButtonAction) -> bool {
     match action {
+        ButtonAction::NewCodex | ButtonAction::NewShell => true,
         ButtonAction::Attach => !state.sessions.is_empty(),
         ButtonAction::SplitRight | ButtonAction::SplitDown => !state.panes.is_empty(),
         ButtonAction::ClosePane => state.panes.len() > 1,
@@ -792,6 +986,51 @@ fn focus_label(current: Focus, target: Focus) -> &'static str {
     } else {
         "click"
     }
+}
+
+fn workspace_base_name(path: &Path) -> String {
+    let raw = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or("amux");
+    let sanitized = raw
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
+                ch
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .trim_matches('-')
+        .to_owned();
+
+    if sanitized.is_empty() {
+        "amux".to_owned()
+    } else {
+        sanitized
+    }
+}
+
+fn unique_session_name(base: &str, sessions: &[Session]) -> String {
+    let names = sessions
+        .iter()
+        .map(|session| session.name.as_str())
+        .collect::<HashSet<_>>();
+    if !names.contains(base) {
+        return base.to_owned();
+    }
+
+    for suffix in 2.. {
+        let candidate = format!("{base}-{suffix}");
+        if !names.contains(candidate.as_str()) {
+            return candidate;
+        }
+    }
+
+    unreachable!("unbounded suffix search always returns")
 }
 
 fn truncate(value: &str, max_chars: usize) -> String {
@@ -829,12 +1068,41 @@ mod tests {
             x: 10,
             y: 4,
             width: 80,
-            height: 3,
+            height: 4,
         });
 
-        assert_eq!(hit_button(&buttons, 12, 5), Some(ButtonAction::Attach));
-        assert_eq!(hit_button(&buttons, 21, 5), Some(ButtonAction::SplitRight));
+        assert_eq!(hit_button(&buttons, 12, 5), Some(ButtonAction::NewCodex));
+        assert_eq!(hit_button(&buttons, 21, 5), Some(ButtonAction::NewShell));
+        assert_eq!(hit_button(&buttons, 12, 6), Some(ButtonAction::Attach));
+        assert_eq!(hit_button(&buttons, 21, 6), Some(ButtonAction::SplitRight));
         assert_eq!(hit_button(&buttons, 12, 4), None);
+    }
+
+    #[test]
+    fn workspace_names_are_safe_tmux_session_names() {
+        assert_eq!(workspace_base_name(Path::new("/root/towerlab")), "towerlab");
+        assert_eq!(workspace_base_name(Path::new("/tmp/my repo")), "my-repo");
+    }
+
+    #[test]
+    fn generated_session_names_avoid_existing_sessions() {
+        let sessions = vec![
+            Session {
+                id: "$0".to_owned(),
+                name: "towerlab".to_owned(),
+                windows: 1,
+                attached: false,
+            },
+            Session {
+                id: "$1".to_owned(),
+                name: "towerlab-2".to_owned(),
+                windows: 1,
+                attached: false,
+            },
+        ];
+
+        assert_eq!(unique_session_name("towerlab", &sessions), "towerlab-3");
+        assert_eq!(unique_session_name("picoagent", &sessions), "picoagent");
     }
 
     #[test]

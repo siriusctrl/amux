@@ -7,6 +7,7 @@ project direction changes.
 
 - Provide a usable CLI for local sessions.
 - Provide a small mouse-friendly TUI dashboard with pane controls.
+- Provide a launcher empty state so users can start Codex or a shell without leaving the TUI.
 - Hide tmux ids and prefix-key behavior from the normal workflow.
 - Keep command output scriptable.
 
