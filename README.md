@@ -1,0 +1,136 @@
+# amux
+
+Friendly client for persistent local and remote agent sessions.
+
+## What It Is
+
+`amux` is a Rust CLI/TUI for running coding agents such as Codex and Claude Code
+inside persistent sessions without exposing tmux's interaction model.
+
+The first implementation is intentionally tmux-backed:
+
+- local sessions use the local tmux server
+- remote sessions will use tmux on the remote host
+- the user-facing controls stay the same across local and remote targets
+- tmux is treated as the session kernel, not the UX
+
+The product goal is a location-transparent agent workspace:
+
+```text
+amux client
+  target: local
+  target: ssh://devbox
+
+session
+  panes
+  persistent PTYs
+  agent status
+  attach/detach
+  mouse-friendly split control
+```
+
+This repository is at the initial scaffold stage. The current CLI already
+checks tmux availability, lists local tmux sessions, creates detached local
+sessions, attaches to a session, and opens a small terminal dashboard.
+
+## Design Stance
+
+- hide tmux mechanics from the user
+- keep local and remote workflows under one model
+- build the TUI like a focused application, not like a prefix-key multiplexer
+- use existing terminal engines and PTY/session backends before writing new ones
+- keep the agent-facing state model explicit enough for future harnesses
+
+`amux` is not trying to be a terminal emulator in the first phase. The initial
+target is a better client for tmux-backed agent sessions.
+
+## Quick Start
+
+Build and test:
+
+```bash
+cargo test
+cargo run -p amux -- doctor
+```
+
+List local sessions:
+
+```bash
+cargo run -p amux -- session list
+```
+
+Create a detached session that runs a command:
+
+```bash
+cargo run -p amux -- new towerlab --cwd /root/towerlab -- codex
+```
+
+Attach to a session:
+
+```bash
+cargo run -p amux -- attach towerlab
+```
+
+Open the dashboard:
+
+```bash
+cargo run -p amux -- tui
+```
+
+Dashboard controls:
+
+```text
+q / Esc      quit
+r            refresh sessions
+j / Down     select next session
+k / Up       select previous session
+Enter        attach selected session
+Mouse click  select a visible session row
+Wheel        move selection
+```
+
+## Current CLI
+
+```text
+amux doctor
+amux target list
+amux session list
+amux new <NAME> [--cwd <DIR>] [-- <COMMAND>...]
+amux attach <NAME>
+amux tui
+```
+
+Only the local target is implemented today. Remote targets are part of the
+first architectural goal, but the CLI is shaped so local and remote behavior can
+share the same session model.
+
+## Repository Layout
+
+```text
+crates/amux/
+  src/cli.rs      command definitions and dispatch
+  src/model.rs    target and session types
+  src/tmux.rs     local tmux backend
+  src/tui.rs      ratatui/crossterm dashboard
+  src/main.rs     binary entrypoint
+
+docs/
+  architecture.md
+  roadmap.md
+  tui-debugging.md
+```
+
+## Development
+
+```bash
+cargo fmt
+cargo test
+cargo clippy --all-targets -- -D warnings
+```
+
+For TUI changes, also run the built binary in a real terminal or PTY and verify
+mouse, resize, refresh, quit, and attach behavior.
+
+## License
+
+MIT

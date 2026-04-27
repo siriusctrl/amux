@@ -1,0 +1,19 @@
+[workspace]
+members = ["crates/amux"]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.95"
+license = "MIT"
+repository = "https://github.com/siriusctrl/amux"
+
+[workspace.dependencies]
+anyhow = "1.0.102"
+clap = { version = "4.6.1", features = ["derive"] }
+crossterm = "0.29.0"
+ratatui = { version = "0.30.0", default-features = false, features = ["crossterm"] }
+thiserror = "2.0.17"
+
+[workspace.metadata.release]
+shared-version = true

@@ -1,0 +1,152 @@
+use std::path::PathBuf;
+
+use anyhow::{Result, bail};
+use clap::{Parser, Subcommand};
+
+use crate::{model::Target, tmux, tui};
+
+#[derive(Debug, Parser)]
+#[command(
+    name = "amux",
+    version,
+    about = "Friendly client for persistent local and remote agent sessions"
+)]
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Debug, Subcommand)]
+enum Command {
+    /// Check local dependencies and backend availability.
+    Doctor,
+
+    /// Manage targets.
+    Target {
+        #[command(subcommand)]
+        command: TargetCommand,
+    },
+
+    /// Manage sessions.
+    Session {
+        #[command(subcommand)]
+        command: SessionCommand,
+    },
+
+    /// Create a detached session.
+    New(NewCommand),
+
+    /// Attach to an existing session.
+    Attach(AttachCommand),
+
+    /// Open the interactive dashboard.
+    Tui,
+}
+
+#[derive(Debug, Subcommand)]
+enum TargetCommand {
+    /// List configured targets.
+    List,
+}
+
+#[derive(Debug, Subcommand)]
+enum SessionCommand {
+    /// List sessions for the active target.
+    List,
+}
+
+#[derive(Debug, Parser)]
+struct NewCommand {
+    /// Session name.
+    name: String,
+
+    /// Start directory for the session.
+    #[arg(long)]
+    cwd: Option<PathBuf>,
+
+    /// Command to run inside the session. Omit to start the user's shell.
+    #[arg(last = true)]
+    command: Vec<String>,
+}
+
+#[derive(Debug, Parser)]
+struct AttachCommand {
+    /// Session name.
+    name: String,
+}
+
+pub fn run() -> Result<()> {
+    let cli = Cli::parse();
+
+    match cli.command {
+        Command::Doctor => doctor(),
+        Command::Target { command } => match command {
+            TargetCommand::List => list_targets(),
+        },
+        Command::Session { command } => match command {
+            SessionCommand::List => list_sessions(),
+        },
+        Command::New(command) => new_session(command),
+        Command::Attach(command) => attach_session(command),
+        Command::Tui => run_tui(),
+    }
+}
+
+fn doctor() -> Result<()> {
+    println!("amux: ok");
+    println!("target: local");
+    println!("tmux: {}", tmux::version()?);
+    Ok(())
+}
+
+fn list_targets() -> Result<()> {
+    let target = Target::local();
+    println!("ID\tKIND\tLABEL");
+    println!("{}\t{}\t{}", target.id, target.kind, target.label);
+    Ok(())
+}
+
+fn list_sessions() -> Result<()> {
+    let sessions = tmux::list_sessions()?;
+    println!("ID\tNAME\tWINDOWS\tSTATUS");
+    for session in sessions {
+        println!(
+            "{}\t{}\t{}\t{}",
+            session.id,
+            session.name,
+            session.windows,
+            session.display_status()
+        );
+    }
+    Ok(())
+}
+
+fn new_session(command: NewCommand) -> Result<()> {
+    if let Some(cwd) = &command.cwd
+        && !cwd.is_dir()
+    {
+        bail!("--cwd is not a directory: {}", cwd.display());
+    }
+
+    tmux::create_session(&command.name, command.cwd.as_deref(), &command.command)?;
+    println!("created session {}", command.name);
+    Ok(())
+}
+
+fn attach_session(command: AttachCommand) -> Result<()> {
+    let status = tmux::attach_session(&command.name)?;
+    if !status.success() {
+        bail!("tmux attach exited with {status}");
+    }
+    Ok(())
+}
+
+fn run_tui() -> Result<()> {
+    if let Some(session) = tui::run()? {
+        let status = tmux::attach_session(&session)?;
+        if !status.success() {
+            bail!("tmux attach exited with {status}");
+        }
+    }
+    Ok(())
+}
