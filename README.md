@@ -116,11 +116,9 @@ amux session list
 amux new <NAME> [--cwd <DIR>] [-- <COMMAND>...]
 amux attach <NAME>
 amux
-amux tui
 ```
 
-Running `amux` with no subcommand opens the dashboard. `amux tui` is kept as an
-explicit alias.
+Running `amux` with no subcommand opens the dashboard.
 
 Only the local target is implemented today. Remote targets are part of the
 first architectural goal, but the CLI is shaped so local and remote behavior can

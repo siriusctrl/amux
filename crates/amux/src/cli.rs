@@ -38,9 +38,6 @@ enum Command {
 
     /// Attach to an existing session.
     Attach(AttachCommand),
-
-    /// Open the interactive dashboard.
-    Tui,
 }
 
 #[derive(Debug, Subcommand)]
@@ -78,17 +75,17 @@ struct AttachCommand {
 pub fn run() -> Result<()> {
     let cli = Cli::parse();
 
-    match cli.command.unwrap_or(Command::Tui) {
-        Command::Doctor => doctor(),
-        Command::Target { command } => match command {
+    match cli.command {
+        None => run_dashboard(),
+        Some(Command::Doctor) => doctor(),
+        Some(Command::Target { command }) => match command {
             TargetCommand::List => list_targets(),
         },
-        Command::Session { command } => match command {
+        Some(Command::Session { command }) => match command {
             SessionCommand::List => list_sessions(),
         },
-        Command::New(command) => new_session(command),
-        Command::Attach(command) => attach_session(command),
-        Command::Tui => run_tui(),
+        Some(Command::New(command)) => new_session(command),
+        Some(Command::Attach(command)) => attach_session(command),
     }
 }
 
@@ -141,7 +138,7 @@ fn attach_session(command: AttachCommand) -> Result<()> {
     Ok(())
 }
 
-fn run_tui() -> Result<()> {
+fn run_dashboard() -> Result<()> {
     if let Some(session) = tui::run()? {
         let status = tmux::attach_session(&session)?;
         if !status.success() {
