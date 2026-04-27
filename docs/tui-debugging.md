@@ -23,11 +23,16 @@ Verify:
 
 - the alternate screen is restored after `q` or `Esc`
 - `r` refreshes the session list
-- arrow keys and `j`/`k` move selection
-- mouse wheel moves selection
-- mouse click selects a visible session row
+- `Tab` switches keyboard focus between session and pane lists
+- arrow keys and `j`/`k` move selection in the focused list
+- mouse wheel moves selection in the hovered list
+- mouse click selects a visible session or pane row
+- mouse click on `Right` creates a side-by-side pane
+- mouse click on `Down` creates a stacked pane
+- mouse click on `Close` closes the selected pane when it is not the last pane
 - terminal resize redraws cleanly
-- `Enter` exits the dashboard and attaches the selected session
+- `Enter` or the `Attach` button exits the dashboard and attaches the selected session
+- attached tmux sessions have mouse support enabled for pane selection and resizing
 
 ## Temporary Sessions
 

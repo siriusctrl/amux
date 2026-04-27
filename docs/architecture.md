@@ -55,6 +55,9 @@ Implemented operations:
 - list sessions
 - create detached sessions
 - attach to sessions
+- list panes for the selected session
+- select, split, and close panes
+- enable tmux mouse support before attach
 
 This keeps the first version useful without committing to tmux as the permanent
 backend.
@@ -68,6 +71,7 @@ The UI should follow focused application behavior:
 - visible status over hidden modes
 - mouse and keyboard controls
 - direct session selection
+- direct pane selection and split controls
 - minimal global key grammar
 - no tmux prefix-key model
 

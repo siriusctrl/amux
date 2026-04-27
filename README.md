@@ -29,9 +29,10 @@ session
   mouse-friendly split control
 ```
 
-This repository is at the initial scaffold stage. The current CLI already
-checks tmux availability, lists local tmux sessions, creates detached local
-sessions, attaches to a session, and opens a small terminal dashboard.
+This repository is at the early MVP stage. The current CLI checks tmux
+availability, lists local tmux sessions, creates detached local sessions,
+attaches to a session, and opens a mouse-friendly dashboard for selecting
+sessions and controlling panes.
 
 ## Design Stance
 
@@ -82,12 +83,21 @@ Dashboard controls:
 ```text
 q / Esc      quit
 r            refresh sessions
-j / Down     select next session
-k / Up       select previous session
+Tab          switch keyboard focus between sessions and panes
+j / Down     select next session or pane
+k / Up       select previous session or pane
 Enter        attach selected session
-Mouse click  select a visible session row
-Wheel        move selection
+|            split selected pane right
+-            split selected pane down
+x            close selected pane
+Mouse click  select a visible session or pane row
+Mouse click  press Attach / Right / Down / Close / Refresh
+Wheel        move selection in the hovered list
 ```
+
+`amux attach` enables tmux mouse support for the selected session before
+attaching, so tmux itself can use mouse selection and pane resizing while the
+session is attached.
 
 ## Current CLI
 

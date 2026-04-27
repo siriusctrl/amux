@@ -48,6 +48,31 @@ impl Session {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Pane {
+    pub id: String,
+    pub index: usize,
+    pub active: bool,
+    pub current_command: String,
+    pub current_path: String,
+    pub width: usize,
+    pub height: usize,
+    pub left: usize,
+    pub top: usize,
+}
+
+impl Pane {
+    pub fn display_status(&self) -> &'static str {
+        if self.active { "active" } else { "idle" }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SplitDirection {
+    Right,
+    Down,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -68,5 +93,21 @@ mod tests {
             attached: false,
         };
         assert_eq!(detached.display_status(), "detached");
+    }
+
+    #[test]
+    fn pane_status_reflects_active_flag() {
+        let pane = Pane {
+            id: "%1".to_owned(),
+            index: 1,
+            active: true,
+            current_command: "bash".to_owned(),
+            current_path: "/tmp".to_owned(),
+            width: 80,
+            height: 24,
+            left: 0,
+            top: 0,
+        };
+        assert_eq!(pane.display_status(), "active");
     }
 }

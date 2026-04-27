@@ -6,7 +6,7 @@ project direction changes.
 ## Phase 1: tmux-backed Local Client
 
 - Provide a usable CLI for local sessions.
-- Provide a small mouse-friendly TUI dashboard.
+- Provide a small mouse-friendly TUI dashboard with pane controls.
 - Hide tmux ids and prefix-key behavior from the normal workflow.
 - Keep command output scriptable.
 
@@ -19,8 +19,9 @@ project direction changes.
 
 ## Phase 3: Pane Control
 
-- Add pane listing and split operations.
-- Support mouse focus and split controls in the TUI.
+- Add pane listing and split operations. Done for the local tmux MVP.
+- Support mouse focus and split controls in the TUI. Done for the local tmux MVP.
+- Add richer pane resizing controls in amux itself.
 - Preserve a simple keyboard fallback for all mouse operations.
 
 ## Phase 4: Agent Awareness

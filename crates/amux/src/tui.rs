@@ -21,7 +21,10 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
 };
 
-use crate::{model::Session, tmux};
+use crate::{
+    model::{Pane, Session, SplitDirection},
+    tmux,
+};
 
 const EVENT_POLL_INTERVAL: Duration = Duration::from_millis(150);
 
@@ -79,63 +82,253 @@ impl Drop for TerminalCleanup {
 #[derive(Debug)]
 struct TuiState {
     sessions: Vec<Session>,
-    selected: usize,
+    selected_session: usize,
+    panes: Vec<Pane>,
+    selected_pane: usize,
+    focus: Focus,
     message: String,
 }
 
 impl TuiState {
-    fn refresh(&mut self) {
+    fn new() -> Self {
+        let mut state = Self {
+            sessions: Vec::new(),
+            selected_session: 0,
+            panes: Vec::new(),
+            selected_pane: 0,
+            focus: Focus::Sessions,
+            message: "loading sessions".to_owned(),
+        };
+        state.refresh_sessions();
+        state
+    }
+
+    fn refresh_sessions(&mut self) {
+        let previous_session = self.selected_session_name();
+        let previous_pane = self.selected_pane_id();
         match tmux::list_sessions() {
             Ok(sessions) => {
                 self.sessions = sessions;
-                self.selected = self.selected.min(self.sessions.len().saturating_sub(1));
-                self.message = format!("{} local sessions", self.sessions.len());
+                self.selected_session = select_index_by_name(
+                    &self.sessions,
+                    previous_session.as_deref(),
+                    self.selected_session,
+                );
+                self.refresh_panes(previous_pane);
+                self.message = format!(
+                    "{} local sessions, {} panes",
+                    self.sessions.len(),
+                    self.panes.len()
+                );
             }
             Err(error) => {
                 self.sessions.clear();
-                self.selected = 0;
+                self.panes.clear();
+                self.selected_session = 0;
+                self.selected_pane = 0;
                 self.message = format!("failed to list sessions: {error}");
+            }
+        }
+    }
+
+    fn refresh_panes(&mut self, preferred_pane: Option<String>) {
+        let Some(session) = self.selected_session_name() else {
+            self.panes.clear();
+            self.selected_pane = 0;
+            return;
+        };
+
+        match tmux::list_panes(&session) {
+            Ok(panes) => {
+                self.panes = panes;
+                self.selected_pane =
+                    select_pane_index(&self.panes, preferred_pane.as_deref(), self.selected_pane);
+            }
+            Err(error) => {
+                self.panes.clear();
+                self.selected_pane = 0;
+                self.message = format!("failed to list panes for {session}: {error}");
             }
         }
     }
 
     fn selected_session_name(&self) -> Option<String> {
         self.sessions
-            .get(self.selected)
+            .get(self.selected_session)
             .map(|session| session.name.clone())
     }
 
-    fn select_next(&mut self) {
+    fn selected_pane_id(&self) -> Option<String> {
+        self.panes
+            .get(self.selected_pane)
+            .map(|pane| pane.id.clone())
+    }
+
+    fn select_next_session(&mut self) {
         if self.sessions.is_empty() {
             return;
         }
-        self.selected = (self.selected + 1).min(self.sessions.len() - 1);
+        self.selected_session = (self.selected_session + 1).min(self.sessions.len() - 1);
+        self.focus = Focus::Sessions;
+        self.refresh_panes(None);
     }
 
-    fn select_previous(&mut self) {
-        self.selected = self.selected.saturating_sub(1);
+    fn select_previous_session(&mut self) {
+        self.selected_session = self.selected_session.saturating_sub(1);
+        self.focus = Focus::Sessions;
+        self.refresh_panes(None);
     }
 
-    fn select_row(&mut self, row: usize) {
+    fn select_session_row(&mut self, row: usize) {
         if row < self.sessions.len() {
-            self.selected = row;
+            self.selected_session = row;
+            self.focus = Focus::Sessions;
+            self.refresh_panes(None);
+            if let Some(name) = self.selected_session_name() {
+                self.message = format!("selected session {name}");
+            }
+        }
+    }
+
+    fn select_next_pane(&mut self) {
+        if self.panes.is_empty() {
+            return;
+        }
+        self.selected_pane = (self.selected_pane + 1).min(self.panes.len() - 1);
+        self.focus = Focus::Panes;
+        self.select_current_pane_in_tmux();
+    }
+
+    fn select_previous_pane(&mut self) {
+        self.selected_pane = self.selected_pane.saturating_sub(1);
+        self.focus = Focus::Panes;
+        self.select_current_pane_in_tmux();
+    }
+
+    fn select_pane_row(&mut self, row: usize) {
+        if row < self.panes.len() {
+            self.selected_pane = row;
+            self.focus = Focus::Panes;
+            self.select_current_pane_in_tmux();
+        }
+    }
+
+    fn select_current_pane_in_tmux(&mut self) {
+        let Some(pane_id) = self.selected_pane_id() else {
+            return;
+        };
+
+        match tmux::select_pane(&pane_id) {
+            Ok(()) => {
+                for pane in &mut self.panes {
+                    pane.active = pane.id == pane_id;
+                }
+                self.message = format!("selected pane {pane_id}");
+            }
+            Err(error) => {
+                self.message = format!("failed to select pane {pane_id}: {error}");
+            }
+        }
+    }
+
+    fn split_selected_pane(&mut self, direction: SplitDirection) {
+        let Some(pane_id) = self.selected_pane_id() else {
+            self.message = "no pane selected".to_owned();
+            return;
+        };
+
+        match tmux::split_pane(&pane_id, direction) {
+            Ok(()) => {
+                self.refresh_panes(None);
+                self.message = match direction {
+                    SplitDirection::Right => "split pane right".to_owned(),
+                    SplitDirection::Down => "split pane down".to_owned(),
+                };
+            }
+            Err(error) => {
+                self.message = format!("failed to split pane {pane_id}: {error}");
+            }
+        }
+    }
+
+    fn close_selected_pane(&mut self) {
+        if self.panes.len() <= 1 {
+            self.message = "not closing the last pane in a session".to_owned();
+            return;
+        }
+
+        let Some(pane_id) = self.selected_pane_id() else {
+            self.message = "no pane selected".to_owned();
+            return;
+        };
+
+        match tmux::kill_pane(&pane_id) {
+            Ok(()) => {
+                self.refresh_panes(None);
+                self.message = format!("closed pane {pane_id}");
+            }
+            Err(error) => {
+                self.message = format!("failed to close pane {pane_id}: {error}");
+            }
+        }
+    }
+
+    fn toggle_focus(&mut self) {
+        self.focus = match self.focus {
+            Focus::Sessions => Focus::Panes,
+            Focus::Panes => Focus::Sessions,
+        };
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Focus {
+    Sessions,
+    Panes,
+}
+
+#[derive(Debug, Clone, Default)]
+struct Hitboxes {
+    sessions: Rect,
+    panes: Rect,
+    buttons: Vec<ButtonHitbox>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ButtonHitbox {
+    area: Rect,
+    action: ButtonAction,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ButtonAction {
+    Attach,
+    SplitRight,
+    SplitDown,
+    ClosePane,
+    Refresh,
+}
+
+impl ButtonAction {
+    fn label(self) -> &'static str {
+        match self {
+            ButtonAction::Attach => "Attach",
+            ButtonAction::SplitRight => "Right",
+            ButtonAction::SplitDown => "Down",
+            ButtonAction::ClosePane => "Close",
+            ButtonAction::Refresh => "Refresh",
         }
     }
 }
 
 fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<Option<String>> {
-    let mut state = TuiState {
-        sessions: Vec::new(),
-        selected: 0,
-        message: "loading sessions".to_owned(),
-    };
-    state.refresh();
+    let mut state = TuiState::new();
     let mut dirty = true;
-    let mut session_area = Rect::default();
+    let mut hitboxes = Hitboxes::default();
 
     loop {
         if dirty {
-            session_area = draw(terminal, &state)?;
+            hitboxes = draw(terminal, &state)?;
             dirty = false;
         }
 
@@ -148,15 +341,37 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<Opt
             Event::Key(key) => match key.code {
                 KeyCode::Char('q') | KeyCode::Esc => return Ok(None),
                 KeyCode::Char('r') => {
-                    state.refresh();
+                    state.refresh_sessions();
+                    dirty = true;
+                }
+                KeyCode::Tab => {
+                    state.toggle_focus();
                     dirty = true;
                 }
                 KeyCode::Char('j') | KeyCode::Down => {
-                    state.select_next();
+                    match state.focus {
+                        Focus::Sessions => state.select_next_session(),
+                        Focus::Panes => state.select_next_pane(),
+                    }
                     dirty = true;
                 }
                 KeyCode::Char('k') | KeyCode::Up => {
-                    state.select_previous();
+                    match state.focus {
+                        Focus::Sessions => state.select_previous_session(),
+                        Focus::Panes => state.select_previous_pane(),
+                    }
+                    dirty = true;
+                }
+                KeyCode::Char('|') => {
+                    state.split_selected_pane(SplitDirection::Right);
+                    dirty = true;
+                }
+                KeyCode::Char('-') => {
+                    state.split_selected_pane(SplitDirection::Down);
+                    dirty = true;
+                }
+                KeyCode::Char('x') => {
+                    state.close_selected_pane();
                     dirty = true;
                 }
                 KeyCode::Enter => return Ok(state.selected_session_name()),
@@ -164,16 +379,36 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<Opt
             },
             Event::Mouse(mouse) => match mouse.kind {
                 MouseEventKind::ScrollDown => {
-                    state.select_next();
+                    if rect_contains(hitboxes.panes, mouse.column, mouse.row) {
+                        state.select_next_pane();
+                    } else {
+                        state.select_next_session();
+                    }
                     dirty = true;
                 }
                 MouseEventKind::ScrollUp => {
-                    state.select_previous();
+                    if rect_contains(hitboxes.panes, mouse.column, mouse.row) {
+                        state.select_previous_pane();
+                    } else {
+                        state.select_previous_session();
+                    }
                     dirty = true;
                 }
                 MouseEventKind::Down(MouseButton::Left) => {
-                    if let Some(row) = session_row_from_mouse(session_area, mouse.row) {
-                        state.select_row(row);
+                    if let Some(action) = hit_button(&hitboxes.buttons, mouse.column, mouse.row) {
+                        if let Some(session) = activate_button(&mut state, action) {
+                            return Ok(Some(session));
+                        }
+                        dirty = true;
+                    } else if rect_contains(hitboxes.sessions, mouse.column, mouse.row) {
+                        if let Some(row) = row_from_mouse(hitboxes.sessions, mouse.row) {
+                            state.select_session_row(row);
+                            dirty = true;
+                        }
+                    } else if rect_contains(hitboxes.panes, mouse.column, mouse.row)
+                        && let Some(row) = row_from_mouse(hitboxes.panes, mouse.row)
+                    {
+                        state.select_pane_row(row);
                         dirty = true;
                     }
                 }
@@ -185,70 +420,63 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<Opt
     }
 }
 
-fn draw(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, state: &TuiState) -> Result<Rect> {
-    let mut session_area = Rect::default();
+fn activate_button(state: &mut TuiState, action: ButtonAction) -> Option<String> {
+    match action {
+        ButtonAction::Attach => state.selected_session_name(),
+        ButtonAction::SplitRight => {
+            state.split_selected_pane(SplitDirection::Right);
+            None
+        }
+        ButtonAction::SplitDown => {
+            state.split_selected_pane(SplitDirection::Down);
+            None
+        }
+        ButtonAction::ClosePane => {
+            state.close_selected_pane();
+            None
+        }
+        ButtonAction::Refresh => {
+            state.refresh_sessions();
+            None
+        }
+    }
+}
+
+fn draw(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    state: &TuiState,
+) -> Result<Hitboxes> {
+    let mut hitboxes = Hitboxes::default();
     terminal
         .draw(|frame| {
             let area = frame.area();
             let [body, footer] =
                 Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(area);
-            let [sessions, details] =
-                Layout::horizontal([Constraint::Percentage(42), Constraint::Percentage(58)])
+            let [sessions, workspace] =
+                Layout::horizontal([Constraint::Percentage(34), Constraint::Percentage(66)])
                     .areas(body);
-            session_area = sessions;
+            let [toolbar, panes, details] = Layout::vertical([
+                Constraint::Length(3),
+                Constraint::Min(8),
+                Constraint::Length(8),
+            ])
+            .areas(workspace);
 
-            let title = format!(" amux local | {} sessions ", state.sessions.len());
-            let items = if state.sessions.is_empty() {
-                vec![ListItem::new(Line::from(vec![Span::styled(
-                    "No tmux sessions. Use `amux new <name> -- <command>`.",
-                    Style::default().fg(Color::DarkGray),
-                )]))]
-            } else {
-                state
-                    .sessions
-                    .iter()
-                    .map(|session| {
-                        let status_style = if session.attached {
-                            Style::default().fg(Color::Green)
-                        } else {
-                            Style::default().fg(Color::DarkGray)
-                        };
-                        ListItem::new(Line::from(vec![
-                            Span::styled(
-                                format!("{:<20}", session.name),
-                                Style::default().add_modifier(Modifier::BOLD),
-                            ),
-                            Span::raw(" "),
-                            Span::styled(session.display_status(), status_style),
-                            Span::raw(format!("  {}w", session.windows)),
-                        ]))
-                    })
-                    .collect()
-            };
-
-            let mut list_state = ListState::default();
-            if !state.sessions.is_empty() {
-                list_state.select(Some(state.selected));
-            }
+            hitboxes.sessions = sessions;
+            hitboxes.panes = panes;
+            hitboxes.buttons = toolbar_buttons(toolbar);
 
             frame.render_stateful_widget(
-                List::new(items)
-                    .block(
-                        Block::default()
-                            .title(title)
-                            .borders(Borders::ALL)
-                            .border_style(Style::default().fg(Color::DarkGray)),
-                    )
-                    .highlight_style(Style::default().bg(Color::DarkGray).fg(Color::White))
-                    .highlight_symbol("> "),
+                render_sessions(state),
                 sessions,
-                &mut list_state,
+                &mut session_list_state(state),
             );
-
+            frame.render_widget(render_toolbar(state), toolbar);
+            frame.render_stateful_widget(render_panes(state), panes, &mut pane_list_state(state));
             frame.render_widget(render_details(state), details);
             frame.render_widget(
                 Paragraph::new(format!(
-                    " {} | q/Esc quit | r refresh | j/k select | Enter attach | mouse click/wheel ",
+                    " {} | Tab | Enter attach | | right | - down | x close | r | q ",
                     state.message
                 ))
                 .style(Style::default().fg(Color::DarkGray)),
@@ -256,12 +484,163 @@ fn draw(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, state: &TuiState)
             );
         })
         .context("failed to draw terminal frame")?;
-    Ok(session_area)
+    Ok(hitboxes)
+}
+
+fn render_sessions(state: &TuiState) -> List<'static> {
+    let title = format!(" sessions | {} ", focus_label(state.focus, Focus::Sessions));
+    let items = if state.sessions.is_empty() {
+        vec![ListItem::new(Line::from(vec![Span::styled(
+            "No sessions. Run `amux new work -- codex`.",
+            Style::default().fg(Color::DarkGray),
+        )]))]
+    } else {
+        state
+            .sessions
+            .iter()
+            .map(|session| {
+                let status_style = if session.attached {
+                    Style::default().fg(Color::Green)
+                } else {
+                    Style::default().fg(Color::DarkGray)
+                };
+                ListItem::new(Line::from(vec![
+                    Span::styled(
+                        format!("{:<18}", truncate(&session.name, 18)),
+                        Style::default().add_modifier(Modifier::BOLD),
+                    ),
+                    Span::raw(" "),
+                    Span::styled(session.display_status(), status_style),
+                    Span::raw(format!("  {}w", session.windows)),
+                ]))
+            })
+            .collect()
+    };
+
+    List::new(items)
+        .block(
+            Block::default()
+                .title(title)
+                .borders(Borders::ALL)
+                .border_style(border_style(state.focus, Focus::Sessions)),
+        )
+        .highlight_style(Style::default().bg(Color::DarkGray).fg(Color::White))
+        .highlight_symbol("> ")
+}
+
+fn render_toolbar(state: &TuiState) -> Paragraph<'static> {
+    let actions = [
+        ButtonAction::Attach,
+        ButtonAction::SplitRight,
+        ButtonAction::SplitDown,
+        ButtonAction::ClosePane,
+        ButtonAction::Refresh,
+    ];
+    let mut spans = Vec::new();
+
+    for action in actions {
+        spans.push(Span::styled(
+            button_label(action),
+            button_style(state, action),
+        ));
+        spans.push(Span::raw(" "));
+    }
+
+    Paragraph::new(Line::from(spans)).block(
+        Block::default()
+            .title(" actions ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::DarkGray)),
+    )
+}
+
+fn render_panes(state: &TuiState) -> List<'static> {
+    let title = format!(" panes | {} ", focus_label(state.focus, Focus::Panes));
+    let items = if state.panes.is_empty() {
+        vec![ListItem::new(Line::from(vec![Span::styled(
+            "No panes for the selected session.",
+            Style::default().fg(Color::DarkGray),
+        )]))]
+    } else {
+        state
+            .panes
+            .iter()
+            .map(|pane| {
+                let status_style = if pane.active {
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::DarkGray)
+                };
+                ListItem::new(Line::from(vec![
+                    Span::styled(
+                        format!("#{} {:<8}", pane.index, pane.display_status()),
+                        status_style,
+                    ),
+                    Span::styled(
+                        format!("{:<14}", truncate(&pane.current_command, 14)),
+                        Style::default().fg(Color::Cyan),
+                    ),
+                    Span::raw(format!(
+                        " {:>3}x{:<3} @{},{} ",
+                        pane.width, pane.height, pane.left, pane.top
+                    )),
+                    Span::styled(truncate(&pane.current_path, 42), Style::default()),
+                ]))
+            })
+            .collect()
+    };
+
+    List::new(items)
+        .block(
+            Block::default()
+                .title(title)
+                .borders(Borders::ALL)
+                .border_style(border_style(state.focus, Focus::Panes)),
+        )
+        .highlight_style(Style::default().bg(Color::DarkGray).fg(Color::White))
+        .highlight_symbol("> ")
 }
 
 fn render_details(state: &TuiState) -> Paragraph<'static> {
-    let lines = match state.sessions.get(state.selected) {
-        Some(session) => vec![
+    let lines = match (
+        state.sessions.get(state.selected_session),
+        state.panes.get(state.selected_pane),
+    ) {
+        (Some(session), Some(pane)) => vec![
+            Line::from(vec![
+                Span::styled("session ", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    session.name.clone(),
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw("  "),
+                Span::styled("pane ", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    pane.id.clone(),
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ]),
+            Line::from(""),
+            Line::from(format!(
+                "cmd: {}    cwd: {}",
+                pane.current_command, pane.current_path
+            )),
+            Line::from(format!(
+                "layout: {}x{} at {},{}    status: {}",
+                pane.width,
+                pane.height,
+                pane.left,
+                pane.top,
+                pane.display_status()
+            )),
+        ],
+        (Some(session), None) => vec![
             Line::from(vec![
                 Span::styled("session ", Style::default().fg(Color::DarkGray)),
                 Span::styled(
@@ -272,18 +651,12 @@ fn render_details(state: &TuiState) -> Paragraph<'static> {
                 ),
             ]),
             Line::from(""),
-            Line::from(format!("id:       {}", session.id)),
-            Line::from(format!("windows:  {}", session.windows)),
-            Line::from(format!("status:   {}", session.display_status())),
-            Line::from(""),
-            Line::from("Enter attaches with tmux for now."),
-            Line::from("Future panes and agent status will live here."),
+            Line::from("No pane data is available for this session."),
         ],
-        None => vec![
+        _ => vec![
             Line::from("No session selected."),
             Line::from(""),
-            Line::from("Create one with:"),
-            Line::from("amux new work -- codex"),
+            Line::from("Create one with `amux new work -- codex`."),
         ],
     };
 
@@ -295,13 +668,140 @@ fn render_details(state: &TuiState) -> Paragraph<'static> {
     )
 }
 
-fn session_row_from_mouse(area: Rect, row: u16) -> Option<usize> {
+fn session_list_state(state: &TuiState) -> ListState {
+    let mut list_state = ListState::default();
+    if !state.sessions.is_empty() {
+        list_state.select(Some(state.selected_session));
+    }
+    list_state
+}
+
+fn pane_list_state(state: &TuiState) -> ListState {
+    let mut list_state = ListState::default();
+    if !state.panes.is_empty() {
+        list_state.select(Some(state.selected_pane));
+    }
+    list_state
+}
+
+fn select_index_by_name(sessions: &[Session], name: Option<&str>, fallback: usize) -> usize {
+    if sessions.is_empty() {
+        return 0;
+    }
+    name.and_then(|name| sessions.iter().position(|session| session.name == name))
+        .unwrap_or_else(|| fallback.min(sessions.len() - 1))
+}
+
+fn select_pane_index(panes: &[Pane], preferred: Option<&str>, fallback: usize) -> usize {
+    if panes.is_empty() {
+        return 0;
+    }
+    preferred
+        .and_then(|pane_id| panes.iter().position(|pane| pane.id == pane_id))
+        .or_else(|| panes.iter().position(|pane| pane.active))
+        .unwrap_or_else(|| fallback.min(panes.len() - 1))
+}
+
+fn toolbar_buttons(area: Rect) -> Vec<ButtonHitbox> {
+    let actions = [
+        ButtonAction::Attach,
+        ButtonAction::SplitRight,
+        ButtonAction::SplitDown,
+        ButtonAction::ClosePane,
+        ButtonAction::Refresh,
+    ];
+    let mut buttons = Vec::new();
+    let mut x = area.x.saturating_add(2);
+    let y = area.y.saturating_add(1);
+
+    for action in actions {
+        let width = button_label(action).chars().count() as u16;
+        buttons.push(ButtonHitbox {
+            area: Rect {
+                x,
+                y,
+                width,
+                height: 1,
+            },
+            action,
+        });
+        x = x.saturating_add(width).saturating_add(1);
+    }
+
+    buttons
+}
+
+fn hit_button(buttons: &[ButtonHitbox], column: u16, row: u16) -> Option<ButtonAction> {
+    buttons
+        .iter()
+        .find(|button| rect_contains(button.area, column, row))
+        .map(|button| button.action)
+}
+
+fn row_from_mouse(area: Rect, row: u16) -> Option<usize> {
     let first_item_row = area.y.saturating_add(1);
     let last_item_row = area.y.saturating_add(area.height).saturating_sub(1);
     if row < first_item_row || row >= last_item_row {
         return None;
     }
     Some(usize::from(row - first_item_row))
+}
+
+fn rect_contains(area: Rect, column: u16, row: u16) -> bool {
+    column >= area.x
+        && column < area.x.saturating_add(area.width)
+        && row >= area.y
+        && row < area.y.saturating_add(area.height)
+}
+
+fn button_label(action: ButtonAction) -> String {
+    format!("[{}]", action.label())
+}
+
+fn button_style(state: &TuiState, action: ButtonAction) -> Style {
+    if button_enabled(state, action) {
+        Style::default()
+            .fg(Color::White)
+            .bg(Color::DarkGray)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    }
+}
+
+fn button_enabled(state: &TuiState, action: ButtonAction) -> bool {
+    match action {
+        ButtonAction::Attach => !state.sessions.is_empty(),
+        ButtonAction::SplitRight | ButtonAction::SplitDown => !state.panes.is_empty(),
+        ButtonAction::ClosePane => state.panes.len() > 1,
+        ButtonAction::Refresh => true,
+    }
+}
+
+fn border_style(current: Focus, target: Focus) -> Style {
+    if current == target {
+        Style::default().fg(Color::Cyan)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    }
+}
+
+fn focus_label(current: Focus, target: Focus) -> &'static str {
+    if current == target {
+        "focused"
+    } else {
+        "click"
+    }
+}
+
+fn truncate(value: &str, max_chars: usize) -> String {
+    let mut chars = value.chars();
+    let truncated = chars.by_ref().take(max_chars).collect::<String>();
+    if chars.next().is_some() {
+        truncated
+    } else {
+        value.to_owned()
+    }
 }
 
 #[cfg(test)]
@@ -317,9 +817,54 @@ mod tests {
             height: 10,
         };
 
-        assert_eq!(session_row_from_mouse(area, 2), None);
-        assert_eq!(session_row_from_mouse(area, 3), Some(0));
-        assert_eq!(session_row_from_mouse(area, 5), Some(2));
-        assert_eq!(session_row_from_mouse(area, 11), None);
+        assert_eq!(row_from_mouse(area, 2), None);
+        assert_eq!(row_from_mouse(area, 3), Some(0));
+        assert_eq!(row_from_mouse(area, 5), Some(2));
+        assert_eq!(row_from_mouse(area, 11), None);
+    }
+
+    #[test]
+    fn toolbar_buttons_have_clickable_hitboxes() {
+        let buttons = toolbar_buttons(Rect {
+            x: 10,
+            y: 4,
+            width: 80,
+            height: 3,
+        });
+
+        assert_eq!(hit_button(&buttons, 12, 5), Some(ButtonAction::Attach));
+        assert_eq!(hit_button(&buttons, 21, 5), Some(ButtonAction::SplitRight));
+        assert_eq!(hit_button(&buttons, 12, 4), None);
+    }
+
+    #[test]
+    fn pane_selection_prefers_active_pane() {
+        let panes = vec![
+            Pane {
+                id: "%1".to_owned(),
+                index: 0,
+                active: false,
+                current_command: "bash".to_owned(),
+                current_path: "/tmp".to_owned(),
+                width: 40,
+                height: 24,
+                left: 0,
+                top: 0,
+            },
+            Pane {
+                id: "%2".to_owned(),
+                index: 1,
+                active: true,
+                current_command: "bash".to_owned(),
+                current_path: "/tmp".to_owned(),
+                width: 40,
+                height: 24,
+                left: 41,
+                top: 0,
+            },
+        ];
+
+        assert_eq!(select_pane_index(&panes, None, 0), 1);
+        assert_eq!(select_pane_index(&panes, Some("%1"), 0), 0);
     }
 }
